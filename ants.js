@@ -1,7 +1,8 @@
 import {CELL,GATE,FIELD,NEST,dist,nestRoute,reveal,excavated,cellKey,canStep,SOURCES,known} from './terrain.js'
 import {queueAtPortal} from './portal.js'
 import {ROYAL,storeResource,addTrail} from './colony.js'
-export const speedOf = ant=>ant.role==='scout'?108:ant.role==='soldier'?65:73
+import {stats,award,guardIds} from './progression.js'
+export const speedOf = ant=>(ant.role==='scout'?108:ant.role==='soldier'?65:73)*stats(ant).speed
 export function moveAnt(state,ant,target,dt,speed=speedOf(ant)) {
   if(ant.view==='colony') {
     const key=Math.round(target.x)+','+Math.round(target.y)
@@ -28,12 +29,19 @@ function dig(state,ant,tunnel,dt) {
     .filter(p=>excavated(state,p)&&nestRoute(state,ant,p).length)
     .sort((a,b)=>dist(a,ant)-dist(b,ant))[0]
   if(!adjacent||!moveAnt(state,ant,adjacent,dt))return
-  tunnel.work+=dt
-  if(tunnel.work>=1.4){tunnel.done=true;state.dug++;ant.earth=(ant.earth||0)+3}
+  tunnel.work+=dt*stats(ant).speed
+  if(tunnel.work>=1.4){tunnel.done=true;state.dug++;ant.earth=(ant.earth||0)+3*stats(ant).yield;award(state,ant,5)}
+}
+function revealAround(state,ant,radius){
+  const discovered=reveal(state,ant,radius)
+  if(ant.role!=='scout'||!discovered)return
+  const total=(ant.scoutCells??0)+discovered
+  ant.scoutCells=total%4
+  if(total>=4)award(state,ant,Math.floor(total/4))
 }
 export function applyManual(state,ant,dt,input) {
   ant.played+=dt
-  ant.energy=Math.min(100,(ant.energy??100)+dt*7)
+
   if(ant.cross&&(input.x||input.y))ant.cross=0
   if(ant.cross) {
     moveAnt(state,ant,queueAtPortal(state,ant),dt)
@@ -50,10 +58,13 @@ export function applyManual(state,ant,dt,input) {
     if(ant.move.portal)queueAtPortal(state,ant)
     ant.move=null
   }
-  if(ant.view==='field')reveal(state,ant,ant.role==='scout'?170:85)
+  if(ant.view==='field')revealAround(state,ant,ant.role==='scout'?170:85)
 }
 export function updateAnts(state,dt,input) {
-  const workers=state.ants.filter(a=>a.role==='worker'&&a.id!==state.selected)
+  const missions=new Map()
+  for(const order of state.missions||[])for(const id of order.members)missions.set(id,order)
+  const guards=guardIds(state)
+  const workers=state.ants.filter(a=>a.role==='worker'&&a.id!==state.selected&&!missions.has(a.id))
   const pending=state.tunnels.find(t=>!t.done)
   if(workers.length&&!state.rain){
     const active=state.trails.some(t=>t.strength>.02)
@@ -63,28 +74,54 @@ export function updateAnts(state,dt,input) {
          (workers.length>=2||source.kind===(state.stock.protein<6?'protein':'sugar')))addTrail(state,source)
     }
   }
-  const diggers=pending?Math.min(4,Math.max(1,Math.floor(workers.length/3))):0
+  const queuedDiggers=[...missions.values()].some(order=>order.type==='dig')
+  const diggers=pending&&!queuedDiggers?Math.min(4,Math.max(1,Math.floor(workers.length/3))):0
   const canHarvest=!state.rain||state.portal.level===3
+  if(canHarvest)for(const order of state.missions||[]){
+    if(order.type!=='harvest'||state.trails.some(t=>t.source===order.target))continue
+    const source=state.sources.find(p=>p.id===order.target)
+    if(source)addTrail(state,source)
+  }
   const trails=canHarvest?state.trails.filter(t=>t.strength>.02):[]
   const jobs=new Map()
   let slot=diggers
   const assignments=trails.map(trail=>({trail,source:state.sources.find(s=>s.id===trail.source),count:0})).filter(j=>j.source)
-  for(const j of [...assignments].sort((a,b)=>a.source.load-b.source.load)){
+  const harvestTargets=new Map(assignments.map(job=>[job.source.id,job]))
+  const reserved=new Set()
+  for(const [id,order] of missions){
+    if(order.type!=='harvest')continue
+    const job=harvestTargets.get(order.target)
+    reserved.add(order.target)
+    if(job)jobs.set(id,job)
+  }
+  const automatic=assignments.filter(job=>!reserved.has(job.source.id))
+  for(const j of [...automatic].sort((a,b)=>a.source.load-b.source.load)){
     j.count=Math.min(j.source.load,workers.length-slot)
     slot+=j.count
   }
-  for(let extra=0;slot<workers.length&&assignments.length;slot++,extra++)assignments[extra%assignments.length].count++
+  for(let extra=0;slot<workers.length&&automatic.length;slot++,extra++)automatic[extra%automatic.length].count++
   slot=diggers
   for(const j of assignments) {
     for(let k=0;k<j.count;k++)jobs.set(workers[slot++].id,j)
   }
   for(const ant of state.ants) {
+    if((ant.energy??100)<100)ant.energy=Math.min(100,ant.energy+dt*7*stats(ant).regen)
     if(ant.id===state.selected){applyManual(state,ant,dt,input);continue}
     if(ant.role==='queen'){ant.cross=0;continue}
-    const job=jobs.get(ant.id)
+    const job=jobs.get(ant.id),order=missions.get(ant.id)
+    const exploring=order?.type==='scout'&&ant.surveyed!==order.id&&!state.rain
     if(ant.view==='field') {
-      reveal(state,ant,ant.role==='scout'?170:68)
-      if(ant.role==='scout'&&ant.explore&&!state.rain){
+      revealAround(state,ant,ant.role==='scout'?170:68)
+      if(exploring&&!ant.cargo){
+        ant.cross=0
+        if(moveAnt(state,ant,order.target,dt)){
+          revealAround(state,ant,ant.role==='scout'?210:125)
+          ant.surveyed=order.id
+          award(state,ant,12)
+        }
+        continue
+      }
+      if(!order&&ant.role==='scout'&&ant.explore&&!state.rain){
         const destinations=[{x:1010,y:490},{x:1100,y:920},{x:430,y:970},{x:380,y:492}]
         const index=ant.exploreIndex||0
         if(index<destinations.length){
@@ -106,11 +143,11 @@ export function updateAnts(state,dt,input) {
       if(next&&moveAnt(state,ant,next,dt)){ant.waypoint=Math.min(ant.waypoint+1,job.trail.points.length);job.trail.strength=Math.min(1,job.trail.strength+.045)}
       continue
     }
-    if(ant.cargo||ant.earth||(!job&&!(ant.role==='scout'&&ant.explore)))ant.cross=0
+    if(ant.cargo||ant.earth||(!job&&!exploring&&!(ant.role==='scout'&&ant.explore)))ant.cross=0
     if(ant.cargo) {
       const room=state.rooms.find(r=>r.type===ant.cargo.kind)||ROYAL
       if(moveAnt(state,ant,room,dt)) {
-        ant.delivered+=storeResource(state,ant.cargo.kind,ant.cargo.amount)
+        deliverCargo(state,ant)
         ant.cargo=null;ant.waypoint=0
       }
       continue
@@ -122,12 +159,12 @@ export function updateAnts(state,dt,input) {
       continue
     }
     if(ant.role==='soldier') {
-      const guard=state.portal.guards.indexOf(ant.id)
-      const at=guard>=0?{x:GATE.colony.x,y:132+guard*12}:state.rooms.find(r=>r.type==='barracks')||ROYAL
+      const guard=guards.indexOf(ant.id)
+      const at=guard>=0?{x:GATE.colony.x,y:132+Math.min(4,guard)*12}:state.rooms.find(r=>r.type==='barracks')||ROYAL
       moveAnt(state,ant,at,dt)
-    }else if(ant.role==='scout'&&ant.explore)moveAnt(state,ant,queueAtPortal(state,ant),dt)
+    }else if(exploring||(!order&&ant.role==='scout'&&ant.explore&&!state.rain))moveAnt(state,ant,queueAtPortal(state,ant),dt)
     else if(job)moveAnt(state,ant,queueAtPortal(state,ant),dt)
-    else if(pending&&workers.indexOf(ant)<diggers){if(!pending.done)dig(state,ant,pending,dt)}
+    else if(pending&&(order?.type==='dig'||(!order&&workers.indexOf(ant)<diggers))){if(!pending.done)dig(state,ant,pending,dt)}
     else if(ant.cross)ant.cross=0
   }
   for(const j of assignments) {
@@ -140,6 +177,12 @@ export function updateAnts(state,dt,input) {
     }
   }
 }
+export function deliverCargo(state,ant) {
+  const amount=storeResource(state,ant.cargo.kind,ant.cargo.amount*stats(ant).yield)
+  ant.delivered+=amount
+  if(amount>0)award(state,ant,ant.cargo.heavy?6:4)
+  return amount
+}
 export function manualDig(state,ant,point) {
   if(ant.view!=='colony'||(ant.energy??100)<18)return false
   const target=point?{x:Math.round(point.x/CELL)*CELL,y:Math.round(point.y/CELL)*CELL}:state.tunnels.find(t=>!t.done&&dist(ant,t)<45)
@@ -150,6 +193,6 @@ export function manualDig(state,ant,point) {
   if(!tunnel){tunnel={...target,done:false,work:0};state.tunnels.push(tunnel)}
   ant.energy=(ant.energy??100)-18
   tunnel.work+=.8
-  if(tunnel.work>=1.4){tunnel.done=true;state.dug++;ant.earth=(ant.earth||0)+3}
+  if(tunnel.work>=1.4){tunnel.done=true;state.dug++;ant.earth=(ant.earth||0)+3*stats(ant).yield;award(state,ant,5)}
   return true
 }

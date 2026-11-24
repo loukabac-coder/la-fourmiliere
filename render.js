@@ -1,6 +1,7 @@
 import {CELL,GATE,NEST,FIELD,ROOM_NAMES,known,dist} from './terrain.js'
 import {DAY,NIGHT} from './colony.js'
 import {rivalGate} from './enemies.js'
+import {FINDS} from './progression.js'
 const colors={sugar:'#fac243',protein:'#da6340',brood:'#fff1c5',queen:'#f8a42f',barracks:'#d26d42'}
 function rect(c,x,y,w,h,color){c.fillStyle=color;c.fillRect(Math.round(x),Math.round(y),w,h)}
 function oval(c,x,y,rx,ry,color) {
@@ -77,12 +78,11 @@ function sprite(role,enemy=false) {
   rect(ctx,26,9,2,2,'#1d1514');rect(ctx,26,5,2,3,bright);rect(ctx,28,3,3,2,bright)
   return c
 }
-export function makeRenderer(canvas,minimap) {
+export function makeRenderer(canvas) {
   const c=canvas.getContext('2d',{alpha:false})
-  const map=document.createElement('canvas');map.width=110;minimap.append(map)
-  const m=map.getContext('2d'),background={colony:landscape('colony'),field:landscape('field')}
+  const background={colony:landscape('colony'),field:landscape('field')}
   const art=Object.fromEntries(['queen','worker','soldier','scout','enemy'].map(role=>[role,sprite(role,role==='enemy')]))
-  let dpr=1,w=1,h=1,scale=1,cam={x:0,y:0},lastView,fade=0,mapTime=0
+  let dpr=1,w=1,h=1,scale=1,cam={x:0,y:0},lastView,fade=0
   function resize(){
     dpr=Math.min(2,window.devicePixelRatio||1)
     w=canvas.clientWidth||1;h=canvas.clientHeight||1
@@ -103,8 +103,7 @@ export function makeRenderer(canvas,minimap) {
   function draw(s,frameTime,follow=true,cursor=null) {
     const selected=s.ants.find(a=>a.id===s.selected),camera=s.camera[s.view]
     const bounds=s.view==='colony'?NEST:FIELD
-    const mapHeight=Math.round(map.width*bounds.h/bounds.w)
-    if(map.height!==mapHeight)map.height=mapHeight
+
     const base=s.view==='colony'?Math.min(w/850,h/410):Math.min(w/600,h/540)
     const desiredScale=Math.max(.22,base*camera.zoom*(selected?1.44:1))
     if(lastView!==s.view){lastView=s.view;fade=1;cam={x:camera.x,y:camera.y};scale=desiredScale}
@@ -159,6 +158,13 @@ export function makeRenderer(canvas,minimap) {
         oval(c,source.x,source.y+6,source.load>1?29:17,11,'#283324')
         for(let i=0;i<5;i++)rect(c,source.x-12+i%3*9,source.y-5+Math.floor(i/3)*9,8,8,colors[source.kind])
         if(scale>.5){c.font='bold 13px monospace';c.textAlign='center';c.fillStyle='#fff0b8';c.fillText(source.name,source.x,source.y-19)}
+      }
+      for(const find of FINDS)if(!s.finds?.includes(find.id)&&known(s,find)){
+        const pulse=2+Math.round((1+Math.sin(frameTime*4))*3)
+        oval(c,find.x,find.y,12+pulse,10+pulse,'#edb94325')
+        rect(c,find.x-4,find.y-5,8,10,'#efa742')
+        rect(c,find.x-2,find.y-8,4,16,'#ffcf6c')
+        rect(c,find.x-2,find.y-4,3,3,'#fff1ad')
       }
       if(known(s,rivalGate))oval(c,rivalGate.x,rivalGate.y,20,14,'#8c4c49')
       for(const a of s.rivalAnts)if(known(s,a))drawAnt({...a,role:'enemy'},false,frameTime)
@@ -217,18 +223,21 @@ export function makeRenderer(canvas,minimap) {
         line(c,[{x,y},{x:x-10,y:y+22}],2,'#9bc5d68b')
       }
     }
+    if(s.view==='field'){
+      for(const order of s.missions||[])if(order.type==='scout'){
+        const p=order.target
+        c.strokeStyle='#93e6cd';c.lineWidth=2
+        c.strokeRect(p.x-8,p.y-8,16,16)
+        line(c,[{x:p.x-14,y:p.y},{x:p.x+14,y:p.y}],1,'#93e6cd')
+        line(c,[{x:p.x,y:p.y-14},{x:p.x,y:p.y+14}],1,'#93e6cd')
+      }
+    }
     c.setTransform(dpr,0,0,dpr,0,0)
     if(s.view==='colony'){
       rect(c,8,8,116,23,'#112927df');c.font='bold 11px monospace';c.fillStyle='#ffd898';c.textAlign='left';c.fillText('Profondeur '+depth,15,23)
     }
     if(fade)rect(c,0,0,w,h,'rgba(10,18,16,'+(fade*.75)+')')
-    if(frameTime-mapTime>.25){
-      mapTime=frameTime
-      rect(m,0,0,map.width,map.height,'#102724')
-      for(const p of s.view==='colony'?s.tunnels.filter(t=>t.done):s.sources.filter(p=>known(s,p)))rect(m,p.x/bounds.w*map.width,p.y/bounds.h*map.height,2,2,'#b97338')
-      if(s.view==='colony')for(const p of s.rooms)oval(m,p.x/bounds.w*map.width,p.y/bounds.h*map.height,4,2,'#db963e')
-      m.strokeStyle='#ffce72';m.strokeRect((cam.x-w/2/scale)/bounds.w*map.width,(cam.y-h/2/scale)/bounds.h*map.height,w/scale/bounds.w*map.width,h/scale/bounds.h*map.height)
-    }
+
   }
   return {draw,world,zoomScale:()=>scale}
 }

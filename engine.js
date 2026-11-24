@@ -2,6 +2,7 @@ import {ageBrood,finishRooms,proposeDig,DAY,NIGHT} from './colony.js'
 import {updateAnts} from './ants.js'
 import {updateEnemies} from './enemies.js'
 import {portalStep} from './portal.js'
+import {checkFinds,finishMissions} from './progression.js'
 export function simulate(state,dt,input={x:0,y:0},emit=()=>{}) {
   state.time+=dt
   state.stock.sugar=Math.max(0,state.stock.sugar-state.ants.length*.014*dt)
@@ -16,6 +17,8 @@ export function simulate(state,dt,input={x:0,y:0},emit=()=>{}) {
   state.trails=state.trails.filter(t=>t.strength>.02)
   updateAnts(state,dt,input)
   portalStep(state,dt)
+  finishMissions(state,emit)
+  checkFinds(state,emit)
   if(finishRooms(state))emit('Une nouvelle salle est prête.',true)
   if(Math.floor((state.time-dt)/4)!==Math.floor(state.time/4))proposeDig(state)
   updateEnemies(state,dt,emit)

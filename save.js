@@ -9,6 +9,9 @@ export function migrate(record) {
   if (!['sugar','protein','earth'].every(key=>Number.isFinite(state.stock[key])) ||
       state.ants.some(ant=>!Number.isFinite(ant.id)||!Number.isFinite(ant.x)||!Number.isFinite(ant.y))) throw Error('Données invalides')
   state.memorial ??= []
+  state.missions ??= []
+  state.amber ??= 0
+  state.finds ??= []
   state.tutorial ??= true
   return {version:VERSION,savedAt:record.savedAt,state}
 }

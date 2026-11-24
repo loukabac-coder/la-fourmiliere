@@ -1,5 +1,6 @@
 import {FIELD,GATE,dist} from './terrain.js'
 import {DAY,NIGHT} from './colony.js'
+import {activeGuards,award} from './progression.js'
 const rivalGate={x:1115,y:885}
 function approach(actor,target,amount) {
   const d=dist(actor,target)
@@ -74,11 +75,12 @@ export function updateEnemies(s,dt,emit) {
   if(!raid)return
   approach(raid,GATE.field,dt*35)
   if(dist(raid,GATE.field)>28)return
-  const guards=s.portal.guards.filter(id=>s.ants.some(a=>a.id===id&&a.view==='colony'&&dist(a,GATE.colony)<75)).length
+  const defenders=activeGuards(s),guards=defenders.length
   raid.hp-=dt*(guards*3+(s.portal.closed?s.portal.level*1.3:0))
   if(raid.hp<=0) {
     if(raid.kind==='rival')s.raidWon=true
     s.raid=null
+    for(const ant of defenders)award(s,ant,16)
     emit('L’entrée a tenu. Attaque repoussée !',true)
   }else if(!s.portal.closed||s.portal.level===1) {
     raid.pressure+=dt/(1+guards)

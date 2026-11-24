@@ -70,9 +70,15 @@ export function nestRoute(state,start,end) {
 }
 export function reveal(state,ant,radius) {
   const spacing=48
+  let discovered=0
   for(let y=Math.floor((ant.y-radius)/spacing);y<=Math.floor((ant.y+radius)/spacing);y++)
     for(let x=Math.floor((ant.x-radius)/spacing);x<=Math.floor((ant.x+radius)/spacing);x++)
-      if(x>=0&&y>=0&&x<30&&y<30&&dist(ant,{x:x*spacing+24,y:y*spacing+24})<radius+24)state.fog[x+','+y]=true
+      if(x>=0&&y>=0&&x<30&&y<30&&dist(ant,{x:x*spacing+24,y:y*spacing+24})<radius+24){
+        const key=x+','+y
+        if(!state.fog[key])discovered++
+        state.fog[key]=true
+      }
+  return discovered
 }
 export const known = (state,p)=>!!state.fog[Math.floor(p.x/48)+','+Math.floor(p.y/48)]
 export const SOURCES = [
@@ -80,5 +86,7 @@ export const SOURCES = [
   {id:2,x:845,y:790,kind:'protein',name:'Graines',load:1,yield:4},
   {id:3,x:1010,y:490,kind:'sugar',name:'Morceau de pomme',load:5,yield:45},
   {id:4,x:380,y:492,kind:'sugar',name:'Pucerons',load:1,yield:9},
-  {id:5,x:1050,y:1000,kind:'protein',name:'Coléoptère',load:1,yield:9}
+  {id:5,x:1050,y:1000,kind:'protein',name:'Coléoptère',load:1,yield:9},
+  {id:6,x:340,y:1010,kind:'sugar',name:'Baies tombées',load:2,yield:24},
+  {id:7,x:1210,y:270,kind:'protein',name:'Graines sauvages',load:1,yield:15}
 ]

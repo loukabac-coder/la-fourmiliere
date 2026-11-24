@@ -1,7 +1,8 @@
 import {createState,lay,planDig,buildRoom,roomIssue,addTrail,offline,DAY,NIGHT,storeResource,ROYAL} from './colony.js'
 import {GATE,NEST,FIELD,dist,known,ROLE_NAMES,ROOM_NAMES,excavated,nestRoute} from './terrain.js'
 import {simulate} from './engine.js'
-import {manualDig} from './ants.js'
+import {manualDig,deliverCargo} from './ants.js'
+import {FINDS,MISSIONS,stats,award,restoreProgression,assignMission,availableAnts} from './progression.js'
 import {upgradePortal,LEVELS,queueAtPortal} from './portal.js'
 import {readSave,writeSave,clearSave,encodeSave,decodeSave} from './save.js'
 import {makeRenderer} from './render.js'
@@ -38,6 +39,7 @@ function detail(label) {
 function tutorial(text){if(state.tutorial)show(text)}
 function start(record) {
   state=record?.state||createState()
+  restoreProgression(state)
   const report=record&&Date.now()-record.savedAt>30000?offline(state,(Date.now()-record.savedAt)/1000):null
   last=0;acc=0;mode=null;follow=true;cursor=null;keys.clear()
   for(const ant of state.ants){
@@ -49,7 +51,7 @@ function start(record) {
     }
   }
   $('home').hidden=true;$('game').hidden=false
-  renderer??=makeRenderer(canvas,$('minimap'))
+  renderer??=makeRenderer(canvas)
   if(dialog.open)dialog.close()
   ui();save()
   if(report) modal('Pendant ton absence',report.sugar+' sucres récoltés · '+report.born+' naissances · '+report.erased+' pistes effacées par la nuit')
@@ -76,7 +78,7 @@ function ui(){
   if(!state)return
   const {stock,view,selected}=state
   const actor=state.ants.find(a=>a.id===selected)
-  $('resources').textContent='Fourmis '+state.ants.length+'  ·  Sucre '+Math.floor(stock.sugar)+'  ·  Protéines '+Math.floor(stock.protein)+'  ·  Terre '+Math.floor(stock.earth)
+  $('resources').textContent='Fourmis '+state.ants.length+'  ·  Sucre '+Math.floor(stock.sugar)+'  ·  Protéines '+Math.floor(stock.protein)+'  ·  Terre '+Math.floor(stock.earth)+'  ·  Ambre '+(state.amber||0)
   const goal=state.record>=30&&state.raidWon
   const task=goal?'Objectif atteint · Record '+state.record:
     state.raid?'Urgence · '+(state.raid.kind==='rival'?'Raid rival':'Scarabée')+' · Protège le portail':
@@ -85,14 +87,15 @@ function ui(){
     'Objectif · '+Math.min(30,state.record)+'/30 fourmis · Fais grandir la colonie'
   $('objective').textContent=task+
     (view==='field'?' · '+(state.rain?'Pluie':state.time%DAY>NIGHT?'Nuit':'Jour'):'')+(actor?' · '+(actor.name||ROLE_NAMES[actor.role]):'')
-  $('minimap').setAttribute('aria-label','Centrer la vue sur '+(view==='colony'?'le nid':'le jardin'))
+
   for(const b of document.querySelectorAll('[data-view]'))b.setAttribute('aria-pressed',String(b.dataset.view===view))
   $('management').hidden=false;$('manual').hidden=!actor
   $('dig-request').hidden=view!=='colony'||!state.digProposal
   $('lay').disabled=!!actor&&actor.role!=='queen'
   $('energy').hidden=!actor||view!=='colony'
   $('energy').value=actor?.energy??100
-  $('actor-status').textContent=actor?'Contrôle · '+ROLE_NAMES[actor.role]:'Vue de gestion'
+  $('actor-status').textContent=actor?'Contrôle · '+ROLE_NAMES[actor.role]+' · Niv. '+stats(actor).level:'Vue de gestion'
+  $('orders').textContent='Missions · J'+(state.missions.length?' ('+state.missions.length+')':'')
   for(const id of ['role','lay','dig','room','build'])$(id).hidden=view!=='colony'
   $('trail').hidden=view!=='field'
   $('carry').hidden=!actor||actor.role==='queen'
@@ -163,10 +166,88 @@ function portalMenu() {
   detail(outside.length+' fourmis dehors')
   for(const ant of outside)button((ant.name||ROLE_NAMES[ant.role]+' '+ant.id)+' · '+Math.round(dist(ant,GATE.field))+' cases graphiques du portail'+(ant.cargo?' · '+(ant.cargo.kind==='sugar'?'sucre':'protéines'):''),()=>{dialog.close();select(ant)})
 }
+let scoutCount=0
+function orders(){
+  modal('Ordres de la reine','Répartis tes fourmis en groupes. Celles qui restent libres continuent de travailler toutes seules.')
+  const form=document.createElement('div');form.className='orders-form';content.append(form)
+  const field=(label,element)=>{
+    const wrapper=document.createElement('label');wrapper.append(label,element);form.append(wrapper);return element
+  }
+  const type=field('Mission',document.createElement('select'))
+  for(const [value,label] of Object.entries(MISSIONS))type.add(new Option(label,value))
+  const target=field('Ressource découverte',document.createElement('select'))
+  for(const source of state.sources.filter(p=>known(state,p)))target.add(new Option(source.name+(source.load>1?' · '+source.load+' minimum':''),source.id))
+  const count=field('Nombre de fourmis',document.createElement('input'))
+  count.type='number';count.min='1';count.step='1'
+  const feedback=document.createElement('p');feedback.setAttribute('role','status');content.append(feedback)
+  const all=button('Toutes les disponibles',()=>{count.value=count.max})
+  const send=button('Envoyer le groupe',()=>{
+    const size=Number(count.value)
+    if(!Number.isInteger(size)||size<1||size>Number(count.max)){feedback.textContent='Choisis un nombre entre 1 et '+count.max+'.';return}
+    if(type.value==='scout'){
+      scoutCount=size
+      switchView('field')
+      mode='scout-order'
+      dialog.close()
+      show('Clique ou touche le secteur à explorer, y compris dans le brouillard.')
+      return
+    }
+    const order=assignMission(state,type.value,size,Number(target.value))
+    if(!order){feedback.textContent='Vérifie le nombre de fourmis requis pour cette ressource.';return}
+    show('Ordre donné · '+MISSIONS[order.type]+' · '+order.members.length+' fourmis.',true)
+    orders()
+  })
+  function update(){
+    const free=availableAnts(state,type.value).length
+    target.parentElement.hidden=type.value!=='harvest'
+    count.max=String(free)
+    count.value=String(Math.min(free,type.value==='harvest'?(state.sources.find(p=>p.id===Number(target.value))?.load||1):1))
+    all.disabled=!free
+    send.disabled=!free||(type.value==='harvest'&&!target.options.length)
+    send.textContent=type.value==='scout'?'Choisir le secteur sur la carte':'Envoyer le groupe'
+    feedback.textContent=free+' fourmis disponibles'+(type.value==='dig'?' · Le groupe attend un chantier autorisé.':'')
+  }
+  type.onchange=target.onchange=update;update()
+  detail('Groupes actifs · '+state.missions.length+' · Trouvailles du jardin '+(state.finds?.length||0)+'/'+FINDS.length)
+  for(const mission of state.missions){
+    const location=mission.type==='harvest'?state.sources.find(p=>p.id===mission.target)?.name:mission.type==='scout'?'Jardin':mission.type==='guard'?'Portail':state.tunnels.some(t=>!t.done)?'En chantier':'En attente d’un chantier'
+    detail(MISSIONS[mission.type]+' · '+mission.members.length+' fourmis · '+location)
+    button('Libérer le groupe '+mission.id,()=>{
+      state.missions=state.missions.filter(m=>m!==mission)
+      save();orders()
+    })
+  }
+  button('Voir les fourmis et leurs niveaux',roster)
+  const amber=button('Repos de la colonie · 5 ambres',()=>{
+    state.amber-=5
+    for(const ant of state.ants)ant.energy=Math.min(100,(ant.energy??100)+50)
+    show('Les fourmis récupèrent jusqu’à 50 points d’énergie.',true)
+    orders()
+  })
+  amber.disabled=state.amber<5||state.ants.every(a=>(a.energy??100)>=100)
+}
+function roster(){
+  modal('Effectifs de la colonie')
+  button('Revenir aux ordres',orders)
+  const list=document.createElement('div');list.className='roster';content.append(list)
+  const ants=state.ants.filter(a=>a.role!=='queen').sort((a,b)=>stats(b).xp-stats(a).xp||a.id-b.id)
+  for(const ant of ants){
+    const mission=state.missions.find(order=>order.members.includes(ant.id))
+    const b=document.createElement('button');b.type='button'
+    const name=document.createElement('strong');name.textContent=ant.name||ROLE_NAMES[ant.role]+' '+ant.id
+    const status=document.createElement('span');status.textContent='Niv. '+stats(ant).level+' · '+(mission?MISSIONS[mission.type]:ant.view==='field'?'Jardin':'Nid')
+    b.append(name,status);list.append(b)
+    b.onclick=()=>{select(ant);hero()}
+  }
+}
 function hero() {
   const a=state.ants.find(ant=>ant.id===state.selected)
   if(!a)return
   modal(a.name||ROLE_NAMES[a.role]+' '+a.id)
+  const rank=stats(a)
+  detail('Niveau '+rank.level+' · '+rank.xp+' / '+rank.next+' XP')
+  const bonus=factor=>'+'+Math.round((factor-1)*100)+' %'
+  detail('Vitesse '+bonus(rank.speed)+' · Rendement '+bonus(rank.yield)+' · Récupération '+bonus(rank.regen))
   detail(a.trips+' expéditions · '+Math.floor(a.delivered)+' ressources rapportées')
   const field=document.createElement('input');field.maxLength=24;field.value=a.name||'';field.placeholder='Nom de la fourmi';field.setAttribute('aria-label','Nom de la fourmi');content.append(field)
   button('Nommer',()=>{a.name=field.value.trim();save();dialog.close()}).disabled=a.played<8
@@ -177,9 +258,9 @@ function action(){
   if(!a)return
   if(a.role==='soldier'){
     const target=[state.raid,...(state.wildlife||[]).filter(e=>e.hp>0),state.spider].find(e=>e&&a.view==='field'&&dist(a,e)<54)
-    if(target===state.raid&&target)target.hp-=5
+    if(target===state.raid&&target){target.hp-=5;award(state,a,3)}
     else if(target===state.spider)state.spider.lure={x:1070,y:555}
-    else if(target){target.hp-=2;if(target.hp<=0) show('Prédateur repoussé.',true)}
+    else if(target){target.hp-=2;if(target.hp<=0){award(state,a,12);show('Prédateur repoussé.',true)}}
     else show('Approche-toi d’un ennemi pour attaquer.')
   }else if(a.role==='scout'){
     show('Zone explorée signalée.')
@@ -199,7 +280,7 @@ function carry(){
   if(a.cargo){
     if(a.view==='colony'){
       const room=state.rooms.find(r=>r.type===a.cargo.kind&&dist(a,r)<r.radius+18)
-      if(room||dist(a,ROYAL)<ROYAL.radius)a.delivered+=storeResource(state,a.cargo.kind,a.cargo.amount)
+      if(room||dist(a,ROYAL)<ROYAL.radius)deliverCargo(state,a)
       else{show('Va dans un grenier ou dans la salle royale pour déposer.');return}
     }
     a.cargo=null;save()
@@ -212,6 +293,7 @@ function carry(){
 function setMode(next,text){mode=mode===next?null:next;ui();if(mode)show(text)}
 $('play').onclick=()=>start(saved)
 $('help').onclick=guide
+$('orders').onclick=orders
 $('options').onclick=$('home-options').onclick=options
 $('portal').onclick=portalMenu
 $('lay').onclick=()=>{if(lay(state,$('role').value))show('Un œuf a été pondu. Les larves consomment une protéine.',true);else show('Il faut 2 sucres et une place pour le couvain.')}
@@ -247,18 +329,7 @@ document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>switchView(b.d
 function zoom(factor){if(state){const c=state.camera[state.view];c.zoom=Math.max(.25,Math.min(4,c.zoom*factor))}}
 $('plus').onclick=()=>zoom(1.25)
 $('minus').onclick=()=>zoom(.8)
-$('minimap').onclick=e=>{
-  if(!state)return
-  const bounds=state.view==='colony'?NEST:FIELD,rect=e.currentTarget.firstElementChild.getBoundingClientRect()
-  const x=e.detail?(e.clientX-rect.left)/rect.width:.5
-  const y=e.detail?(e.clientY-rect.top)/rect.height:.5
-  follow=false
-  Object.assign(state.camera[state.view],{
-    x:x*bounds.w,
-    y:y*bounds.h
-  })
-  ui()
-}
+
 function pan(dx,dy){
   const camera=state.camera[state.view],bounds=state.view==='colony'?NEST:FIELD
   const ant=state.ants.find(a=>a.id===state.selected)
@@ -301,7 +372,7 @@ canvas.addEventListener('pointermove',e=>{
     else if(mode==='trail'){
       const point=renderer.world(at.x,at.y)
       if(gesture.points.length<90&&dist(gesture.points.at(-1)||gesture.start,point)>12)gesture.points.push(point)
-    }else if(!mode){pan(gesture.last.x-at.x,gesture.last.y-at.y)}
+    }else if(!mode||mode==='scout-order'){pan(gesture.last.x-at.x,gesture.last.y-at.y)}
   }
   gesture.last=at
 })
@@ -318,6 +389,15 @@ canvas.addEventListener('pointerup',e=>{
     const count=planDig(state,g.start,p)
     if(count)state.digProposal=null
     show(count?count+' cases ajoutées au chantier.':'Pars d’une chambre ou d’une galerie déjà creusée.',!!count)
+    return
+  }
+  if(mode==='scout-order'){
+    if(g.moved)return
+    const target={x:Math.round(p.x),y:Math.round(p.y)}
+    if(target.x<0||target.y<0||target.x>FIELD.w||target.y>FIELD.h){show('Choisis un point à l’intérieur du jardin.');return}
+    const order=assignMission(state,'scout',scoutCount,target)
+    mode=null;ui()
+    show(order?'Équipe envoyée. Le secteur se dévoilera à son passage.':'Ce groupe n’est plus disponible.',!!order)
     return
   }
   if(mode==='build'){
@@ -380,7 +460,7 @@ function chooseRoom(type){
 const shortcuts={
   e:()=>state.view==='colony'&&(state.selected===null||state.selected===0)&&$('lay').click(),
   f:excavate,b:()=>state.view==='colony'&&$('build').click(),r:()=>$('random').click(),
-  h:()=>$('event').click(),p:crossPortal,o:portalMenu,c:carry,x:action,g:queen,i:hero,
+  h:()=>$('event').click(),p:crossPortal,o:portalMenu,c:carry,x:action,g:queen,i:hero,j:orders,
   t:()=>state.view==='field'&&$('trail').click(),v:()=>switchView(state.view==='colony'?'field':'colony'),
   m:()=>{pan(0,0);state.selected=null;mode=null;ui()},
   '1':()=>chooseRoom('brood'),'2':()=>chooseRoom('sugar'),'3':()=>chooseRoom('protein'),'4':()=>chooseRoom('barracks'),

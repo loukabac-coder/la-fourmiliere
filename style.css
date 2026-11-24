@@ -5,6 +5,13 @@
 .key-list{display:flex;gap:.5rem 1rem;flex-wrap:wrap;max-height:23dvh;overflow:auto;padding-top:.65rem}
 kbd{display:inline-block;padding:.1rem .25rem;border:1px solid #987048;border-radius:3px;background:#091a19;color:#ffdf93}
 button.request{border-color:#91dfc7;color:#b9f0dd}
+.orders-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:.6rem;margin:.9rem 0}
+.roster{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:.4rem;margin-top:.7rem}
+.roster button{display:grid;gap:.2rem;text-align:left}
+.roster button span{font-size:.85rem;color:#f2b967}
+.orders-form label{display:grid;gap:.3rem;color:#f5dba2}
+.orders-form input,.orders-form select{width:100%;min-width:0}
+.orders-form input{border:1px solid #a86e39;background:#102a28;color:#ffdfa4;padding:.5rem;font:inherit}
 *{box-sizing:border-box} [hidden]{display:none!important}
 :root{color-scheme:dark;--gold:#ffce72;--rim:#a56832;--ink:#0b1d1c;--panel:#143634;--cream:#ffe7b1}
 body{margin:0;background:var(--ink);color:var(--cream);font:16px system-ui,sans-serif}
@@ -29,9 +36,7 @@ canvas{width:100%;height:100%;display:block;touch-action:none;image-rendering:pi
 #zoom{position:absolute;right:.55rem;top:.55rem;display:flex;gap:.25rem}
 #notice{position:absolute;left:.55rem;bottom:.55rem;margin:0;background:#0e2625ed;padding:.45rem .6rem;border:1px solid var(--rim);max-width:min(70%,34rem);pointer-events:none}
 #notice:empty{display:none}
-#minimap{position:absolute;right:.55rem;bottom:.55rem;width:90px;padding:2px;overflow:hidden;line-height:0;cursor:crosshair}
-#minimap:hover,#minimap:focus-visible{border-color:var(--gold)}
-#minimap canvas{width:100%;height:auto;display:block}
+
 dialog{width:min(95vw,35rem);max-height:85dvh;background:#132b29;color:var(--cream);border:2px solid var(--rim);border-radius:8px;padding:1rem}
 dialog::backdrop{background:#071312bb}
 dialog form{float:right}
@@ -40,5 +45,12 @@ dialog button{margin:.2rem}
 dialog ol{padding-inline-start:1.35rem}
 dialog li{padding-inline-start:.2rem;margin-block:.6rem}
 dialog li p{margin:.2rem 0 0;line-height:1.45}
-@media(max-width:600px){header,nav,footer{padding:.35rem;gap:.3rem}header strong{width:100%}#resources{margin-inline-start:0;font-size:.78rem}button,select{min-height:36px;padding:.3rem .45rem}footer button,footer select{font-size:.79rem}#minimap{width:57px}}
-@media(max-height:490px) and (orientation:landscape){header strong{width:auto}#objective{font-size:.72rem}footer{padding:.2rem}}
+@media(max-width:600px){header,nav,footer{padding:.35rem;gap:.3rem}header strong{width:100%}#resources{margin-inline-start:0;font-size:.78rem}button,select{min-height:36px;padding:.3rem .45rem}footer button,footer select{font-size:.79rem}}
+@media(max-height:490px) and (orientation:landscape){
+  header,nav,footer{padding:.2rem .4rem;gap:.25rem}
+  header strong{width:auto;font-size:1.1rem}
+  #resources,#objective{font-size:.74rem}
+  header button,nav button,footer button,footer select{padding:.28rem .42rem;font-size:.76rem;min-height:29px}
+  footer>div{gap:.2rem}
+  #controls-guide{padding:.22rem}
+}

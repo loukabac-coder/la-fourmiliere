@@ -1,5 +1,5 @@
 import {mkdir,copyFile,readFile,writeFile} from 'node:fs/promises'
-const files=['index.html','style.css','favicon.svg','fourmiliere.png','main.js','render.js','engine.js','terrain.js','colony.js','ants.js','enemies.js','portal.js','save.js']
+const files=['index.html','style.css','favicon.svg','fourmiliere.png','main.js','render.js','engine.js','progression.js','terrain.js','colony.js','ants.js','enemies.js','portal.js','save.js']
 await mkdir('dist',{recursive:true})
 await Promise.all(files.map(file=>copyFile(file,'dist/'+file)))
 const [owner,repository]=process.env.GITHUB_REPOSITORY?.split('/')||[]

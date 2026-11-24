@@ -1,1 +1,1 @@
-{"name":"la-fourmiliere","private":true,"type":"module","scripts":{"start":"node serve.js","test":"node --test"}}
+{"name":"la-fourmiliere","private":true,"type":"module","scripts":{"start":"node serve.js","build":"node build.js","test":"node --test"}}

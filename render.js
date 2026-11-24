@@ -67,7 +67,7 @@ function sprite(role,enemy=false) {
 }
 export function makeRenderer(canvas,minimap) {
   const c=canvas.getContext('2d',{alpha:false})
-  const map=document.createElement('canvas');map.width=110;map.height=90;minimap.append(map)
+  const map=document.createElement('canvas');map.width=110;minimap.append(map)
   const m=map.getContext('2d'),background={colony:landscape('colony'),field:landscape('field')}
   const art=Object.fromEntries(['queen','worker','soldier','scout','enemy'].map(role=>[role,sprite(role,role==='enemy')]))
   let dpr=1,w=1,h=1,scale=1,cam={x:0,y:0},lastView,fade=0,mapTime=0
@@ -90,6 +90,9 @@ export function makeRenderer(canvas,minimap) {
   }
   function draw(s,frameTime) {
     const selected=s.ants.find(a=>a.id===s.selected),camera=s.camera[s.view]
+    const bounds=s.view==='colony'?NEST:FIELD
+    const mapHeight=Math.round(map.width*bounds.h/bounds.w)
+    if(map.height!==mapHeight)map.height=mapHeight
     const base=s.view==='colony'?Math.min(w/850,h/410):Math.min(w/600,h/540)
     const desiredScale=Math.max(.22,base*camera.zoom*(selected?1.44:1))
     if(lastView!==s.view){lastView=s.view;fade=1;cam={x:camera.x,y:camera.y};scale=desiredScale}
@@ -157,11 +160,10 @@ export function makeRenderer(canvas,minimap) {
     if(fade)rect(c,0,0,w,h,'rgba(10,18,16,'+(fade*.75)+')')
     if(frameTime-mapTime>.25){
       mapTime=frameTime
-      const bounds=s.view==='colony'?NEST:FIELD
-      rect(m,0,0,110,90,'#102724')
-      for(const p of s.view==='colony'?s.tunnels.filter(t=>t.done):s.sources.filter(p=>known(s,p)))rect(m,p.x/bounds.w*110,p.y/bounds.h*90,2,2,'#b97338')
-      if(s.view==='colony')for(const p of s.rooms)oval(m,p.x/bounds.w*110,p.y/bounds.h*90,4,2,'#db963e')
-      m.strokeStyle='#ffce72';m.strokeRect((cam.x-w/2/scale)/bounds.w*110,(cam.y-h/2/scale)/bounds.h*90,w/scale/bounds.w*110,h/scale/bounds.h*90)
+      rect(m,0,0,map.width,map.height,'#102724')
+      for(const p of s.view==='colony'?s.tunnels.filter(t=>t.done):s.sources.filter(p=>known(s,p)))rect(m,p.x/bounds.w*map.width,p.y/bounds.h*map.height,2,2,'#b97338')
+      if(s.view==='colony')for(const p of s.rooms)oval(m,p.x/bounds.w*map.width,p.y/bounds.h*map.height,4,2,'#db963e')
+      m.strokeStyle='#ffce72';m.strokeRect((cam.x-w/2/scale)/bounds.w*map.width,(cam.y-h/2/scale)/bounds.h*map.height,w/scale/bounds.w*map.width,h/scale/bounds.h*map.height)
     }
   }
   return {draw,world,zoomScale:()=>scale}

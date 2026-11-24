@@ -22,12 +22,16 @@ canvas{width:100%;height:100%;display:block;touch-action:none;image-rendering:pi
 #zoom{position:absolute;right:.55rem;top:.55rem;display:flex;gap:.25rem}
 #notice{position:absolute;left:.55rem;bottom:.55rem;margin:0;background:#0e2625ed;padding:.45rem .6rem;border:1px solid var(--rim);max-width:min(70%,34rem);pointer-events:none}
 #notice:empty{display:none}
-#minimap{position:absolute;right:.55rem;bottom:.55rem;width:90px;pointer-events:none}
-#minimap canvas{width:100%;height:auto;border:1px solid var(--rim)}
+#minimap{position:absolute;right:.55rem;bottom:.55rem;width:90px;padding:2px;overflow:hidden;line-height:0;cursor:crosshair}
+#minimap:hover,#minimap:focus-visible{border-color:var(--gold)}
+#minimap canvas{width:100%;height:auto;display:block}
 dialog{width:min(95vw,35rem);max-height:85dvh;background:#132b29;color:var(--cream);border:2px solid var(--rim);border-radius:8px;padding:1rem}
 dialog::backdrop{background:#071312bb}
 dialog form{float:right}
 dialog textarea{width:100%;min-height:6rem;margin:.5rem 0}
 dialog button{margin:.2rem}
+dialog ol{padding-inline-start:1.35rem}
+dialog li{padding-inline-start:.2rem;margin-block:.6rem}
+dialog li p{margin:.2rem 0 0;line-height:1.45}
 @media(max-width:600px){header,nav,footer{padding:.35rem;gap:.3rem}header strong{width:100%}#resources{margin-inline-start:0;font-size:.78rem}button,select{min-height:36px;padding:.3rem .45rem}footer button,footer select{font-size:.79rem}#minimap{width:57px}}
 @media(max-height:490px) and (orientation:landscape){header strong{width:auto}#objective{font-size:.72rem}footer{padding:.2rem}}

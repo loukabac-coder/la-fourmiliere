@@ -45,7 +45,7 @@ function start(record) {
   if(dialog.open)dialog.close()
   ui();save()
   if(report) modal('Pendant ton absence',report.sugar+' sucres récoltés · '+report.born+' naissances · '+report.erased+' pistes effacées par la nuit')
-  else if(!record)tutorial('Commence par pondre. Puis ouvre le Terrain et touche des miettes pour envoyer tes ouvrières.')
+  else if(!record&&state.tutorial)guide()
 }
 function switchView(view,keep=false){
   if(!keep&&state.ants.find(a=>a.id===state.selected)?.view!==view)state.selected=null
@@ -68,8 +68,14 @@ function ui(){
   const actor=state.ants.find(a=>a.id===selected)
   $('resources').textContent='Fourmis '+state.ants.length+'  ·  Sucre '+Math.floor(stock.sugar)+'  ·  Protéines '+Math.floor(stock.protein)+'  ·  Terre '+Math.floor(stock.earth)
   const goal=state.record>=30&&state.raidWon
-  $('objective').textContent=(goal?'Objectif atteint · Record '+state.record:'Objectif · '+Math.min(30,state.record)+'/30 fourmis · '+(state.raidWon?'Raid repoussé':'Raid à repousser'))+
+  const task=goal?'Objectif atteint · Record '+state.record:
+    state.raid?'Urgence · '+(state.raid.kind==='rival'?'Raid rival':'Scarabée')+' · Protège le portail':
+    state.raidWon?'Raid repoussé · Objectif : 30 fourmis':
+    state.record>=30?'30 fourmis · Prépare les défenses':
+    'Objectif · '+Math.min(30,state.record)+'/30 fourmis · Fais grandir la colonie'
+  $('objective').textContent=task+
     (view==='field'?' · '+(state.rain?'Pluie':state.time%DAY>NIGHT?'Nuit':'Jour'):'')+(actor?' · '+(actor.name||ROLE_NAMES[actor.role]):'')
+  $('minimap').setAttribute('aria-label','Centrer la vue sur '+(view==='colony'?'le nid':'le jardin'))
   for(const b of document.querySelectorAll('[data-view]'))b.setAttribute('aria-pressed',String(b.dataset.view===view))
   $('management').hidden=!!actor;$('manual').hidden=!actor
   for(const id of ['role','lay','dig','room','build'])$(id).hidden=view!=='colony'
@@ -77,6 +83,23 @@ function ui(){
   $('carry').hidden=actor?.role!=='worker'
   $('action').textContent=actor?.role==='soldier'?'Attaquer':actor?.role==='scout'?'Alerter':view==='colony'?'Creuser / déposer':'Poser une piste'
   for(const id of ['dig','build','trail'])$(id).setAttribute('aria-pressed',String(mode===id))
+}
+function guide(){
+  modal('Guide de la colonie','Ton but : faire grandir la colonie jusqu’à 30 fourmis, puis repousser le raid rival.')
+  const steps=[
+    ['Élever le couvain','Choisis une ouvrière pour les travaux, une soldate pour la garde ou une éclaireuse pour explorer, puis Pondre. Les larves ont besoin de protéines pour grandir.'],
+    ['Creuser et aménager','Active Creuser, puis glisse depuis une galerie vers la terre. Les ouvrières creusent et rapportent la terre. Choisis ensuite une chambre et touche une galerie creusée pour la construire : 6 terres, ou 10 pour une caserne.'],
+    ['Récolter au jardin','Passe sur Terrain et touche une ressource visible pour tracer une piste. Les ouvrières la suivront et rapporteront la nourriture automatiquement. La pomme demande cinq fourmis.'],
+    ['Défendre le portail','Ouvre Portail pour fermer l’entrée et poster des soldates près du passage. Les gardes aident à neutraliser les attaques ; améliore le portail pour renforcer la défense.'],
+    ['Explorer et contrôler','Touche une fourmi pour l’incarner. Déplace-la avec ZQSD, WASD ou les flèches ; touche une destination sur la carte. Sans fourmi incarnée, glisse pour déplacer la caméra ; pince pour zoomer. Retour à la reine recentre le nid.']
+  ]
+  const list=document.createElement('ol')
+  for(const [title,text] of steps){
+    const item=document.createElement('li'),strong=document.createElement('strong'),description=document.createElement('p')
+    strong.textContent=title;description.textContent=text;item.append(strong,description);list.append(item)
+  }
+  content.append(list)
+  button('Reprendre la partie',()=>dialog.close())
 }
 function options() {
   modal('Options')
@@ -171,6 +194,7 @@ function carry(){
 }
 function setMode(next,text){mode=mode===next?null:next;ui();if(mode)show(text)}
 $('play').onclick=()=>start(saved)
+$('help').onclick=guide
 $('options').onclick=$('home-options').onclick=options
 $('portal').onclick=portalMenu
 $('lay').onclick=()=>{if(lay(state,$('role').value))show('Un œuf a été pondu. Les larves consomment une protéine.',true);else show('Il faut 2 sucres et une place pour le couvain.')}
@@ -191,6 +215,18 @@ document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>switchView(b.d
 function zoom(factor){if(state){const c=state.camera[state.view];c.zoom=Math.max(.25,Math.min(4,c.zoom*factor))}}
 $('plus').onclick=()=>zoom(1.25)
 $('minus').onclick=()=>zoom(.8)
+$('minimap').onclick=e=>{
+  if(!state)return
+  const bounds=state.view==='colony'?NEST:FIELD,rect=e.currentTarget.firstElementChild.getBoundingClientRect()
+  const x=e.detail?(e.clientX-rect.left)/rect.width:.5
+  const y=e.detail?(e.clientY-rect.top)/rect.height:.5
+  state.selected=null
+  Object.assign(state.camera[state.view],{
+    x:x*bounds.w,
+    y:y*bounds.h
+  })
+  ui()
+}
 canvas.addEventListener('wheel',e=>{e.preventDefault();zoom(e.deltaY<0?1.13:.88)},{passive:false})
 const pointer=e=>{const r=canvas.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top}}
 canvas.addEventListener('pointerdown',e=>{

@@ -137,6 +137,8 @@ export function makeRenderer(canvas,minimap) {
         for(const p of dug)rect(c,p.x-size,p.y-size,size*2,size*2,color)
       }
       for(const t of s.tunnels.filter(t=>!t.done))rect(c,t.x-7,t.y-7,14,14,'#ffc77346')
+      if(s.digProposal)line(c,[s.digProposal.start,s.digProposal.end],3,'#91dfc7bb',[4,7])
+      for(const room of s.roomProjects||[]){c.strokeStyle='#9ce3d0';c.setLineDash([5,5]);c.strokeRect(room.x-26,room.y-22,52,44);c.setLineDash([])}
       for(const room of s.rooms){
         oval(c,room.x,room.y,room.radius+5,room.radius*.75+5,'#a9532a')
         oval(c,room.x,room.y,room.radius,room.radius*.75,'#d28243')

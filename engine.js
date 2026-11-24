@@ -1,4 +1,4 @@
-import {ageBrood,DAY,NIGHT} from './colony.js'
+import {ageBrood,finishRooms,proposeDig,DAY,NIGHT} from './colony.js'
 import {updateAnts} from './ants.js'
 import {updateEnemies} from './enemies.js'
 import {portalStep} from './portal.js'
@@ -16,6 +16,8 @@ export function simulate(state,dt,input={x:0,y:0},emit=()=>{}) {
   state.trails=state.trails.filter(t=>t.strength>.02)
   updateAnts(state,dt,input)
   portalStep(state,dt)
+  if(finishRooms(state))emit('Une nouvelle salle est prête.',true)
+  if(Math.floor((state.time-dt)/4)!==Math.floor(state.time/4))proposeDig(state)
   updateEnemies(state,dt,emit)
   if(born)emit(born===1?'Une nouvelle fourmi est née !':born+' fourmis sont nées !',true)
 }

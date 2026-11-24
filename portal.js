@@ -4,7 +4,7 @@ export function portalStep(state,dt) {
   const gate=state.portal
   gate.cooldown=Math.max(0,gate.cooldown-dt)
   if(gate.closed||gate.cooldown>0)return
-  const first=state.ants.filter(ant=>ant.cross&&dist(ant,GATE[ant.view])<80).sort((a,b)=>a.cross-b.cross)[0]
+  const first=state.ants.filter(ant=>ant.cross&&dist(ant,GATE[ant.view])<3).sort((a,b)=>a.cross-b.cross)[0]
   if(!first)return
   const from=first.view
   first.view=from==='field'?'colony':'field'

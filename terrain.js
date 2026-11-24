@@ -17,7 +17,14 @@ export function gridLine(a,b) {
   return result
 }
 export function excavated(state,p) {
-  return state.tunnels.some(t=>cellKey(t)===cellKey(p)&&t.done) || state.rooms.some(r=>dist(r,p)<r.radius)
+  const center={x:Math.round(p.x/CELL)*CELL,y:Math.round(p.y/CELL)*CELL}
+  return state.tunnels.some(t=>cellKey(t)===cellKey(center)&&t.done) || state.rooms.some(r=>dist(r,center)<r.radius)
+}
+export function canStep(state,from,to) {
+  const xChanged=Math.round(from.x/CELL)!==Math.round(to.x/CELL)
+  const yChanged=Math.round(from.y/CELL)!==Math.round(to.y/CELL)
+  return excavated(state,to)&&(!xChanged||!yChanged||
+    (excavated(state,{x:from.x,y:to.y})&&excavated(state,{x:to.x,y:from.y})))
 }
 const paths = new WeakMap()
 export function nestRoute(state,start,end) {
@@ -37,6 +44,7 @@ export function nestRoute(state,start,end) {
     paths.set(state,cached)
   }
   const startKey=cellKey(start),endKey=cellKey(end),key=startKey+'>'+endKey
+  if(!cached.cells.has(startKey)||!cached.cells.has(endKey))return []
   if(!cached.routes.has(key)) {
     const queue=[startKey],parents=new Map([[startKey,null]])
     for(let i=0;i<queue.length&&!parents.has(endKey);i++){
@@ -47,8 +55,8 @@ export function nestRoute(state,start,end) {
       }
     }
     const result=[]
-    if(parents.has(endKey)) {
-      for(let step=endKey;step!==startKey;step=parents.get(step)){
+    if(parents.has(endKey)&&startKey!==endKey) {
+      for(let step=endKey;step!==null;step=parents.get(step)){
         const [x,y]=step.split(',').map(Number)
         result.unshift({x:x*CELL,y:y*CELL})
       }

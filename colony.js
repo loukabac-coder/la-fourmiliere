@@ -1,4 +1,4 @@
-import {CELL,GATE,NEST,FIELD,SOURCES,gridLine,cellKey,dist,excavated,reveal} from './terrain.js'
+import {CELL,GATE,NEST,FIELD,SOURCES,gridLine,cellKey,dist,excavated,reveal,nestRoute} from './terrain.js'
 export const ROYAL={x:576,y:252,radius:66,type:'queen'}
 export const NIGHT=165
 export const DAY=240
@@ -41,13 +41,48 @@ export function planDig(state,start,end) {
   state.tunnels.push(...route.map(p=>({...p,done:false,work:0})))
   return route.length
 }
+export function proposeDig(state) {
+  if(state.digProposal||state.tunnels.some(t=>!t.done)||!state.ants.some(a=>a.role==='worker'))return
+  const starts=[...state.tunnels.filter(t=>t.done)].sort((a,b)=>b.y-a.y)
+  for(const start of starts){
+    for(const [dx,dy] of [[0,6],[6,0],[-6,0]]){
+      const end={x:start.x+dx*CELL,y:start.y+dy*CELL}
+      if(end.y>NEST.h-CELL||end.x<CELL||end.x>NEST.w-CELL||
+         !gridLine(start,end).some(p=>!excavated(state,p)))continue
+      state.digProposal={start:{x:start.x,y:start.y},end}
+      return
+    }
+  }
+}
+export function finishRooms(state) {
+  if(!state.roomProjects?.length)return 0
+  const ready=state.roomProjects.filter(room=>nestRoute(state,GATE.colony,room).length)
+  state.roomProjects=state.roomProjects.filter(room=>!ready.includes(room))
+  state.rooms.push(...ready)
+  return ready.length
+}
+export function roomIssue(state,type,p) {
+  const x=Math.round(p.x/CELL)*CELL,y=Math.round(p.y/CELL)*CELL
+  if(x<2*CELL||x>NEST.w-2*CELL||y<7*CELL||y>NEST.h-2*CELL)return 'Choisis un emplacement à l’intérieur du sous-sol.'
+  if([...state.rooms,...(state.roomProjects||[])].some(room=>dist(room,{x,y})<5*CELL))return 'Laisse au moins 5 blocs entre les centres des salles.'
+  const cost=type==='barracks'?10:6
+  if(state.stock.earth<cost)return 'Il faut '+cost+' terres.'
+  return ''
+}
 export function buildRoom(state,type,p) {
   const site={x:Math.round(p.x/CELL)*CELL,y:Math.round(p.y/CELL)*CELL,radius:38,type}
   const cost=type==='barracks'?10:6
-  if(state.stock.earth<cost||site.x<40||site.x>NEST.w-40||site.y<150||site.y>NEST.h-40||
-    !excavated(state,site)||state.rooms.some(room=>dist(room,site)<room.radius+30))return false
+  if(!['brood','sugar','protein','barracks'].includes(type)||roomIssue(state,type,p))return false
+  if(nestRoute(state,GATE.colony,site).length)state.rooms.push(site)
+  else{
+    const start=state.tunnels.filter(t=>t.done&&nestRoute(state,GATE.colony,t).length)
+      .sort((a,b)=>dist(a,site)-dist(b,site))[0]
+    if(!start)return false
+    planDig(state,start,site)
+    state.roomProjects??=[]
+    state.roomProjects.push(site)
+  }
   state.stock.earth-=cost
-  state.rooms.push(site)
   return true
 }
 export function addTrail(state,source,points=[]) {
@@ -75,7 +110,7 @@ export function offline(state,seconds) {
     active.forEach((t,index)=>{
       const available=Math.floor(workers/active.length)+(index<workers%active.length?1:0)
       const source=state.sources.find(s=>s.id===t.source)
-      if(!source||available<source.load)return
+      if(!source||available<source.load||state.portal.closed)return
       const trip=t.points.slice(1).reduce((total,p,j)=>total+dist(p,t.points[j]),0)*2/69+5
       const gain=storeResource(state,source.kind,dt/trip*source.yield*available/source.load)
       if(source.kind==='sugar')sugar+=gain

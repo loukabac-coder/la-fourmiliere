@@ -1,19 +1,17 @@
-import {CELL,GATE,FIELD,NEST,dist,nestRoute,reveal,excavated,cellKey} from './terrain.js'
+import {CELL,GATE,FIELD,NEST,dist,nestRoute,reveal,excavated,cellKey,canStep,SOURCES,known} from './terrain.js'
 import {queueAtPortal} from './portal.js'
-import {ROYAL,storeResource} from './colony.js'
+import {ROYAL,storeResource,addTrail} from './colony.js'
 export const speedOf = ant=>ant.role==='scout'?108:ant.role==='soldier'?65:73
 export function moveAnt(state,ant,target,dt,speed=speedOf(ant)) {
   if(ant.view==='colony') {
     const key=Math.round(target.x)+','+Math.round(target.y)
-    if(ant.route?.key!==key)ant.route={key,points:nestRoute(state,ant,target).slice(),dug:state.dug}
-    if(ant.route.dug!==state.dug&&!ant.route.points.length) {
-      ant.route={key,points:nestRoute(state,ant,target).slice(),dug:state.dug}
-    }
-    if(dist(ant,target)<2)return true
+    const layout=state.dug+':'+state.rooms.length
+    if(ant.route?.key!==key||ant.route.layout!==layout)ant.route={key,points:nestRoute(state,ant,target),layout}
+    if(dist(ant,target)<.01){Object.assign(ant,{x:target.x,y:target.y});return true}
     if(!ant.route.points.length)return false
     const point=ant.route.points[0]
     if(step(ant,point,dt,speed))ant.route.points.shift()
-    return dist(ant,target)<2
+    return dist(ant,target)<.01
   }
   return step(ant,target,dt,speed)
 }
@@ -25,9 +23,10 @@ function step(ant,target,dt,speed) {
   return ratio===1
 }
 function dig(state,ant,tunnel,dt) {
-  const route=nestRoute(state,ant,ant)
-  if(!route.length)return
-  const adjacent=state.tunnels.filter(t=>t.done&&dist(t,tunnel)<=24).sort((a,b)=>dist(a,ant)-dist(b,ant))[0]
+  const adjacent=[[0,0],[CELL,0],[-CELL,0],[0,CELL],[0,-CELL]]
+    .map(([dx,dy])=>({x:tunnel.x+dx,y:tunnel.y+dy}))
+    .filter(p=>excavated(state,p)&&nestRoute(state,ant,p).length)
+    .sort((a,b)=>dist(a,ant)-dist(b,ant))[0]
   if(!adjacent||!moveAnt(state,ant,adjacent,dt))return
   tunnel.work+=dt
   if(tunnel.work>=1.4){tunnel.done=true;state.dug++;ant.earth=(ant.earth||0)+3}
@@ -45,7 +44,8 @@ export function applyManual(state,ant,dt,input) {
     ant.move=null
     const n=Math.hypot(input.x,input.y)
     const target={x:Math.max(8,Math.min(bounds.w-8,ant.x+input.x/n*speedOf(ant)*dt)),y:Math.max(8,Math.min(bounds.h-8,ant.y+input.y/n*speedOf(ant)*dt))}
-    if(ant.view==='field'||nestRoute(state,ant,target).length)step(ant,target,dt,speedOf(ant))
+    if(ant.view==='field'||canStep(state,ant,target))step(ant,target,dt,speedOf(ant))
+    ant.route=null
   }else if(ant.move&&moveAnt(state,ant,ant.move,dt)){
     if(ant.move.portal)queueAtPortal(state,ant)
     ant.move=null
@@ -55,6 +55,14 @@ export function applyManual(state,ant,dt,input) {
 export function updateAnts(state,dt,input) {
   const workers=state.ants.filter(a=>a.role==='worker'&&a.id!==state.selected)
   const pending=state.tunnels.find(t=>!t.done)
+  if(workers.length&&!state.rain){
+    const active=state.trails.some(t=>t.strength>.02)
+    if(!active)for(const starter of SOURCES.slice(0,2)){
+      const source=state.sources.find(p=>p.id===starter.id)
+      if(source&&known(state,source)&&!state.trails.some(t=>t.source===source.id)&&
+         (workers.length>=2||source.kind===(state.stock.protein<6?'protein':'sugar')))addTrail(state,source)
+    }
+  }
   const diggers=pending?Math.min(4,Math.max(1,Math.floor(workers.length/3))):0
   const canHarvest=!state.rain||state.portal.level===3
   const trails=canHarvest?state.trails.filter(t=>t.strength>.02):[]
@@ -72,7 +80,7 @@ export function updateAnts(state,dt,input) {
   }
   for(const ant of state.ants) {
     if(ant.id===state.selected){applyManual(state,ant,dt,input);continue}
-    if(ant.role==='queen')continue
+    if(ant.role==='queen'){ant.cross=0;continue}
     const job=jobs.get(ant.id)
     if(ant.view==='field') {
       reveal(state,ant,ant.role==='scout'?170:68)
@@ -88,6 +96,7 @@ export function updateAnts(state,dt,input) {
       if(state.rain&&ant.role==='scout'){ant.explore=false;ant.exploreIndex=0}
       if(ant.cargo||!job) {
         if(ant.cargo&&job&&ant.cargo.source===job.source.id&&ant.waypoint>0){
+          ant.waypoint=Math.min(ant.waypoint,job.trail.points.length-1)
           if(moveAnt(state,ant,job.trail.points[ant.waypoint-1],dt,ant.cargo.heavy?41:speedOf(ant)))ant.waypoint--
         }else moveAnt(state,ant,queueAtPortal(state,ant),dt)
         continue
@@ -97,6 +106,7 @@ export function updateAnts(state,dt,input) {
       if(next&&moveAnt(state,ant,next,dt)){ant.waypoint=Math.min(ant.waypoint+1,job.trail.points.length);job.trail.strength=Math.min(1,job.trail.strength+.045)}
       continue
     }
+    if(ant.cargo||ant.earth||(!job&&!(ant.role==='scout'&&ant.explore)))ant.cross=0
     if(ant.cargo) {
       const room=state.rooms.find(r=>r.type===ant.cargo.kind)||ROYAL
       if(moveAnt(state,ant,room,dt)) {
@@ -121,7 +131,7 @@ export function updateAnts(state,dt,input) {
     else if(ant.cross)ant.cross=0
   }
   for(const j of assignments) {
-    const group=state.ants.filter(a=>a.view==='field'&&!a.cargo&&a.job===j.source.id&&dist(a,j.source)<15)
+    const group=state.ants.filter(a=>a.view==='field'&&a.id!==state.selected&&jobs.get(a.id)===j&&!a.cargo&&a.job===j.source.id&&dist(a,j.source)<15)
     while(group.length>=j.source.load) {
       for(const ant of group.splice(0,j.source.load)){
         ant.cargo={kind:j.source.kind,source:j.source.id,amount:j.source.yield/j.source.load,heavy:j.source.load>1}

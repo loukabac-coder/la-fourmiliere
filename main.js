@@ -1,5 +1,5 @@
-import {createState,lay,planDig,buildRoom,addTrail,offline,DAY,NIGHT,storeResource,ROYAL} from './colony.js'
-import {GATE,NEST,FIELD,dist,known,ROLE_NAMES,ROOM_NAMES} from './terrain.js'
+import {createState,lay,planDig,buildRoom,roomIssue,addTrail,offline,DAY,NIGHT,storeResource,ROYAL} from './colony.js'
+import {GATE,NEST,FIELD,dist,known,ROLE_NAMES,ROOM_NAMES,excavated,nestRoute} from './terrain.js'
 import {simulate} from './engine.js'
 import {manualDig} from './ants.js'
 import {upgradePortal,LEVELS,queueAtPortal} from './portal.js'
@@ -39,7 +39,15 @@ function tutorial(text){if(state.tutorial)show(text)}
 function start(record) {
   state=record?.state||createState()
   const report=record&&Date.now()-record.savedAt>30000?offline(state,(Date.now()-record.savedAt)/1000):null
-  last=0;acc=0;mode=null;follow=true;cursor=null
+  last=0;acc=0;mode=null;follow=true;cursor=null;keys.clear()
+  for(const ant of state.ants){
+    ant.route=null
+    if(ant.view==='colony'&&!excavated(state,ant)){
+      const point=state.tunnels.filter(t=>t.done&&nestRoute(state,GATE.colony,t).length)
+        .sort((a,b)=>dist(a,ant)-dist(b,ant))[0]||ROYAL
+      Object.assign(ant,{x:point.x,y:point.y,move:null,cross:0})
+    }
+  }
   $('home').hidden=true;$('game').hidden=false
   renderer??=makeRenderer(canvas,$('minimap'))
   if(dialog.open)dialog.close()
@@ -53,8 +61,11 @@ function switchView(view,keep=false){
 }
 function select(ant) {
   if(!ant)return
+  const previous=state.ants.find(a=>a.id===state.selected)
+  if(previous){previous.move=null;previous.route=null;previous.cross=0}
+  keys.clear()
   follow=true
-  state.selected=ant.id;ant.move=null;ant.cross=0
+  state.selected=ant.id;ant.move=null;ant.cross=0;ant.route=null
   switchView(ant.view,true)
   tutorial('Indique une destination ou utilise ZQSD et les flèches. Touche le portail pour le traverser.')
 }
@@ -76,13 +87,15 @@ function ui(){
     (view==='field'?' · '+(state.rain?'Pluie':state.time%DAY>NIGHT?'Nuit':'Jour'):'')+(actor?' · '+(actor.name||ROLE_NAMES[actor.role]):'')
   $('minimap').setAttribute('aria-label','Centrer la vue sur '+(view==='colony'?'le nid':'le jardin'))
   for(const b of document.querySelectorAll('[data-view]'))b.setAttribute('aria-pressed',String(b.dataset.view===view))
-  $('management').hidden=!!actor&&actor.role!=='queen';$('manual').hidden=!actor
+  $('management').hidden=false;$('manual').hidden=!actor
+  $('dig-request').hidden=view!=='colony'||!state.digProposal
+  $('lay').disabled=!!actor&&actor.role!=='queen'
   $('energy').hidden=!actor||view!=='colony'
   $('energy').value=actor?.energy??100
   $('actor-status').textContent=actor?'Contrôle · '+ROLE_NAMES[actor.role]:'Vue de gestion'
   for(const id of ['role','lay','dig','room','build'])$(id).hidden=view!=='colony'
   $('trail').hidden=view!=='field'
-  $('carry').hidden=actor?.role!=='worker'
+  $('carry').hidden=!actor||actor.role==='queen'
   $('excavate').hidden=view!=='colony'
   $('action').textContent=actor?.role==='soldier'?'Attaquer':actor?.role==='scout'?'Alerter':view==='colony'?'Creuser / déposer':'Poser une piste'
   for(const id of ['dig','build','trail'])$(id).setAttribute('aria-pressed',String(mode===id))
@@ -91,8 +104,8 @@ function guide(){
   modal('Guide de la colonie','Ton but : faire grandir la colonie jusqu’à 30 fourmis, puis repousser le raid rival.')
   const steps=[
     ['Élever le couvain','Choisis une ouvrière pour les travaux, une soldate pour la garde ou une éclaireuse pour explorer, puis Pondre. Les larves ont besoin de protéines pour grandir.'],
-    ['Creuser et aménager','Active Creuser, puis glisse depuis une galerie vers la terre. Les ouvrières creusent et rapportent la terre. Choisis ensuite une chambre et touche une galerie creusée pour la construire : 6 terres, ou 10 pour une caserne.'],
-    ['Récolter au jardin','Passe sur Terrain et touche une ressource visible pour tracer une piste. Les ouvrières la suivront et rapporteront la nourriture automatiquement. La pomme demande cinq fourmis.'],
+    ['Creuser et aménager','Active Creuser, puis glisse depuis une galerie vers la terre. Les ouvrières creusent et rapportent la terre. Accepte une demande de creusement ou choisis le tracé. Place une salle à cinq blocs des autres salles. Coût : 6 terres, ou 10 pour une caserne.'],
+    ['Récolter au jardin','Les ouvrières récoltent près du portail sans ordre. Touche une ressource visible pour tracer une autre piste. Avec une fourmi incarnée, appuie sur C près des graines pour les récupérer. La pomme demande cinq fourmis.'],
     ['Défendre le portail','Ouvre Portail pour fermer l’entrée et poster des soldates près du passage. Les gardes aident à neutraliser les attaques ; améliore le portail pour renforcer la défense.'],
     ['Explorer et contrôler','Touche une fourmi pour l’incarner. Déplace-la avec ZQSD, WASD ou les flèches ; touche une destination sur la carte. Fais glisser la carte ou défile à deux doigts pour déplacer la caméra. Pince pour zoomer. Appuie sur G pour incarner la reine.']
   ]
@@ -182,7 +195,7 @@ function action(){
 }
 function carry(){
   const a=state.ants.find(ant=>ant.id===state.selected)
-  if(!a)return
+  if(!a||a.role==='queen')return
   if(a.cargo){
     if(a.view==='colony'){
       const room=state.rooms.find(r=>r.type===a.cargo.kind&&dist(a,r)<r.radius+18)
@@ -191,8 +204,8 @@ function carry(){
     }
     a.cargo=null;save()
   }else if(a.view==='field'){
-    const p=state.sources.find(p=>dist(a,p)<28)
-    if(p?.load===1)a.cargo={kind:p.kind,source:p.id,amount:p.yield*2}
+    const p=state.sources.filter(p=>dist(a,p)<32).sort((first,last)=>dist(a,first)-dist(a,last))[0]
+    if(p?.load===1){a.cargo={kind:p.kind,source:p.id,amount:p.yield*2};show(p.name+' récupéré. Appuie sur P pour rentrer.',true)}
     else show(p?'Trace une piste pour réunir cinq fourmis.':'Approche-toi d’une ressource.')
   }
 }
@@ -203,7 +216,22 @@ $('options').onclick=$('home-options').onclick=options
 $('portal').onclick=portalMenu
 $('lay').onclick=()=>{if(lay(state,$('role').value))show('Un œuf a été pondu. Les larves consomment une protéine.',true);else show('Il faut 2 sucres et une place pour le couvain.')}
 $('dig').onclick=()=>setMode('dig','Glisse depuis une galerie ou une chambre vers la terre à creuser.')
-$('build').onclick=()=>setMode('build','Choisis une case creusée et assez loin des autres chambres.')
+$('build').onclick=()=>setMode('build','Choisis un emplacement à 5 blocs ou plus des autres salles, même dans la terre.')
+$('dig-request').onclick=()=>{
+  const proposal=state.digProposal
+  if(!proposal)return
+  modal('Demande de creusement','Les ouvrières proposent une galerie de '+Math.round(dist(proposal.start,proposal.end)/24)+' blocs. Son tracé est marqué sur la carte.')
+  button('Autoriser ce tracé',()=>{
+    const count=planDig(state,proposal.start,proposal.end)
+    state.digProposal=null
+    dialog.close();ui()
+    show(count?count+' blocs autorisés. Les ouvrières s’en chargent.':'Cette galerie est déjà en chantier.',true)
+  })
+  button('Choisir un autre tracé',()=>{
+    state.digProposal=null
+    dialog.close();mode=null;$('dig').click();save()
+  })
+}
 $('trail').onclick=()=>setMode('trail','Glisse du portail jusqu’à une ressource visible.')
 $('queen').onclick=queen
 $('hero').onclick=hero
@@ -288,13 +316,18 @@ canvas.addEventListener('pointerup',e=>{
   const source=view==='field'&&state.sources.find(s=>known(state,s)&&dist(s,p)<37)
   if(mode==='dig'){
     const count=planDig(state,g.start,p)
+    if(count)state.digProposal=null
     show(count?count+' cases ajoutées au chantier.':'Pars d’une chambre ou d’une galerie déjà creusée.',!!count)
     return
   }
   if(mode==='build'){
     const type=$('room').value
-    const built=buildRoom(state,type,p)
-    show(built?ROOM_NAMES[type]+' aménagé.':'Il faut une case de galerie libre et '+(type==='barracks'?10:6)+' terre.',built)
+    const issue=roomIssue(state,type,p)
+    const previous=state.roomProjects?.length||0
+    const built=!issue&&buildRoom(state,type,p)
+    if(built){mode=null;ui()}
+    const queued=(state.roomProjects?.length||0)>previous
+    show(built?(queued?'Chantier autorisé. Les ouvrières vont raccorder la salle.':ROOM_NAMES[type]+' aménagé.'):issue||'Impossible de raccorder cet emplacement.',built)
     return
   }
   if(mode==='trail'){

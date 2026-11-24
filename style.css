@@ -12,6 +12,10 @@ button.request{border-color:#91dfc7;color:#b9f0dd}
 .orders-form label{display:grid;gap:.3rem;color:#f5dba2}
 .orders-form input,.orders-form select{width:100%;min-width:0}
 .orders-form input{border:1px solid #a86e39;background:#102a28;color:#ffdfa4;padding:.5rem;font:inherit}
+#build-actions{flex-basis:100%;align-items:center;border:1px solid #589889;background:#173c37;padding:.35rem}
+#build-status{flex:1;min-width:10rem;font-size:.86rem}
+#build-confirm{border-color:#91dfc7}
+.brood-status{align-self:center;color:#ffdc9e;font-size:.82rem}
 *{box-sizing:border-box} [hidden]{display:none!important}
 :root{color-scheme:dark;--gold:#ffce72;--rim:#a56832;--ink:#0b1d1c;--panel:#143634;--cream:#ffe7b1}
 body{margin:0;background:var(--ink);color:var(--cream);font:16px system-ui,sans-serif}

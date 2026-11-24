@@ -1,13 +1,14 @@
-export const VERSION = 2
+export const VERSION = 3
 export const KEY = 'la-fourmiliere'
 export function migrate(record) {
-  if (!record || ![1, VERSION].includes(record.version) || !Number.isFinite(record.savedAt)) throw Error('Version inconnue')
+  if (!record || ![1, 2, VERSION].includes(record.version) || !Number.isFinite(record.savedAt)) throw Error('Version inconnue')
   const state = record.state
   if (!state || !Array.isArray(state.ants) || !Array.isArray(state.rooms) || !Array.isArray(state.tunnels)
     || !Array.isArray(state.sources) || !Array.isArray(state.trails) || !Array.isArray(state.brood)
     || !state.portal || !state.stock || !state.fog) throw Error('Sauvegarde incomplète')
   if (!['sugar','protein','earth'].every(key=>Number.isFinite(state.stock[key])) ||
       state.ants.some(ant=>!Number.isFinite(ant.id)||!Number.isFinite(ant.x)||!Number.isFinite(ant.y))) throw Error('Données invalides')
+  if(record.version<3)for(const egg of state.brood)egg.age=egg.age<=9?egg.age*60/9:60+(egg.age-9)*8
   state.memorial ??= []
   state.missions ??= []
   state.amber ??= 0

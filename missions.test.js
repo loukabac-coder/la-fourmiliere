@@ -7,6 +7,7 @@ import {assignMission,availableAnts,award,stats,checkFinds,FINDS} from './progre
 const run=(s,seconds)=>{for(let n=0;n<seconds*20;n++)simulate(s,.05)}
 test('specified groups work simultaneously and gain individual experience',()=>{
   const s=createState(),source=s.sources[1]
+  s.stock.protein=0
   assert.equal(assignMission(s,'harvest',0,source.id),null)
   assert.equal(assignMission(s,'harvest',1,7),null)
   const forage=assignMission(s,'harvest',2,source.id)

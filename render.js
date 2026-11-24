@@ -1,5 +1,5 @@
-import {CELL,GATE,NEST,FIELD,ROOM_NAMES,known,dist} from './terrain.js'
-import {DAY,NIGHT} from './colony.js'
+import {CELL,GATE,NEST,FIELD,ROOM_NAMES,known,dist,excavated} from './terrain.js'
+import {DAY,NIGHT,broodLayout,LARVA_SECONDS,ROOM_LIMITS,BASE_STORAGE} from './colony.js'
 import {rivalGate} from './enemies.js'
 import {FINDS} from './progression.js'
 const colors={sugar:'#fac243',protein:'#da6340',brood:'#fff1c5',queen:'#f8a42f',barracks:'#d26d42'}
@@ -100,7 +100,7 @@ export function makeRenderer(canvas) {
     if(ant.earth)rect(c,size*.37,-4,7,7,'#b87148')
     c.restore()
   }
-  function draw(s,frameTime,follow=true,cursor=null) {
+  function draw(s,frameTime,follow=true,cursor=null,preview=null) {
     const selected=s.ants.find(a=>a.id===s.selected),camera=s.camera[s.view]
     const bounds=s.view==='colony'?NEST:FIELD
 
@@ -138,20 +138,40 @@ export function makeRenderer(canvas) {
       for(const t of s.tunnels.filter(t=>!t.done))rect(c,t.x-7,t.y-7,14,14,'#ffc77346')
       if(s.digProposal)line(c,[s.digProposal.start,s.digProposal.end],3,'#91dfc7bb',[4,7])
       for(const room of s.roomProjects||[]){c.strokeStyle='#9ce3d0';c.setLineDash([5,5]);c.strokeRect(room.x-26,room.y-22,52,44);c.setLineDash([])}
+      const allocated={...BASE_STORAGE}
       for(const room of s.rooms){
         oval(c,room.x,room.y,room.radius+5,room.radius*.75+5,'#a9532a')
         oval(c,room.x,room.y,room.radius,room.radius*.75,'#d28243')
         oval(c,room.x,room.y-3,room.radius-5,room.radius*.75-6,'#63301d')
         if(scale>.38){c.fillStyle='#ffdc9e';c.font='bold 12px monospace';c.textAlign='center';c.fillText(ROOM_NAMES[room.type],room.x,room.y+room.radius*.72)}
-        if(['sugar','protein'].includes(room.type))for(let i=0;i<Math.min(10,s.stock[room.type]/4);i++)rect(c,room.x-21+i%5*9,room.y+9-Math.floor(i/5)*8,7,7,colors[room.type])
+        if(['sugar','protein'].includes(room.type)){
+          const kind=room.type,capacity=ROOM_LIMITS[kind]
+          const filled=Math.min(capacity,Math.max(0,s.stock[kind]-allocated[kind]))
+          allocated[kind]+=capacity
+          for(let i=0;i<Math.ceil(filled/capacity*10);i++)rect(c,room.x-21+i%5*9,room.y+9-Math.floor(i/5)*8,7,7,colors[kind])
+          rect(c,room.x-23,room.y-15,46,3,'#351d16')
+          if(filled>0)rect(c,room.x-23,room.y-15,46*filled/capacity,3,colors[kind])
+        }
         if(room.type==='barracks')for(let i=-2;i<=2;i++){rect(c,room.x+i*9,room.y-15,2,24,'#f7ac55');rect(c,room.x+i*9-1,room.y-17,4,4,'#ffe3ac')}
       }
-      const brood=s.rooms.filter(r=>r.type==='brood')
-      s.brood.forEach((egg,i)=>{
-        const room=brood.length?brood[i%brood.length]:s.rooms[0]
-        const j=Math.floor(i/(brood.length||1))
-        oval(c,room.x-22+(j%6)*9,room.y+14-Math.floor(j/6)*8,4,egg.age>=9?2:5,'#fff1c5')
-      })
+      for(const {egg,room,slot} of broodLayout(s)){
+        oval(c,room.x-13+(slot%3)*13,room.y+14-Math.floor(slot/3)*8,5,egg.age>=LARVA_SECONDS?3:6,egg.age>=LARVA_SECONDS&&!egg.fed?'#db916a':'#fff1c5')
+      }
+      if(preview&&Number.isFinite(preview.x)){
+        for(let dx=-3;dx<=3;dx++)for(let dy=-3;dy<=3;dy++){
+          const x=preview.x+dx*CELL,y=preview.y+dy*CELL
+          if(excavated(s,{x,y})){
+            c.strokeStyle='#a5f5ce5c';c.lineWidth=1
+            c.strokeRect(x-CELL/2,y-CELL/2,CELL,CELL)
+          }
+        }
+        const color=preview.issue?'#ff8f75':'#a5f5ce'
+        oval(c,preview.x,preview.y,38,29,preview.issue?'#ff745643':'#86f4ba47')
+        c.strokeStyle=color;c.lineWidth=2;c.setLineDash([5,4]);c.beginPath()
+        c.ellipse(preview.x,preview.y,38,29,0,0,Math.PI*2);c.stroke();c.setLineDash([])
+        c.fillStyle=color;c.font='bold 13px monospace';c.textAlign='center'
+        c.fillText(ROOM_NAMES[preview.type],preview.x,preview.y-36)
+      }
     }else{
       for(const trail of s.trails)line(c,trail.points,4,'rgba(216,240,107,'+Math.max(0,trail.strength)+')',[2,8])
       for(const source of s.sources)if(known(s,source)){

@@ -1,6 +1,6 @@
 import {CELL,GATE,FIELD,NEST,dist,nestRoute,reveal,excavated,cellKey,canStep,SOURCES,known} from './terrain.js'
 import {queueAtPortal} from './portal.js'
-import {ROYAL,storeResource,addTrail} from './colony.js'
+import {ROYAL,storageCapacity,storeResource,addTrail} from './colony.js'
 import {stats,award,guardIds} from './progression.js'
 export const speedOf = ant=>(ant.role==='scout'?108:ant.role==='soldier'?65:73)*stats(ant).speed
 export function moveAnt(state,ant,target,dt,speed=speedOf(ant)) {
@@ -163,7 +163,7 @@ export function updateAnts(state,dt,input) {
       const at=guard>=0?{x:GATE.colony.x,y:132+Math.min(4,guard)*12}:state.rooms.find(r=>r.type==='barracks')||ROYAL
       moveAnt(state,ant,at,dt)
     }else if(exploring||(!order&&ant.role==='scout'&&ant.explore&&!state.rain))moveAnt(state,ant,queueAtPortal(state,ant),dt)
-    else if(job)moveAnt(state,ant,queueAtPortal(state,ant),dt)
+    else if(job&&state.stock[job.source.kind]<storageCapacity(state,job.source.kind))moveAnt(state,ant,queueAtPortal(state,ant),dt)
     else if(pending&&(order?.type==='dig'||(!order&&workers.indexOf(ant)<diggers))){if(!pending.done)dig(state,ant,pending,dt)}
     else if(ant.cross)ant.cross=0
   }

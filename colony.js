@@ -2,6 +2,10 @@ import {CELL,GATE,NEST,FIELD,SOURCES,gridLine,cellKey,dist,excavated,reveal,nest
 export const ROYAL={x:576,y:252,radius:66,type:'queen'}
 export const NIGHT=165
 export const DAY=240
+export const HATCH_SECONDS=180
+export const LARVA_SECONDS=60
+export const LAY_INTERVAL=30
+export const ROOM_LIMITS={brood:3,sugar:36,protein:24,barracks:3}
 export function newAnt(id,role,at=ROYAL) {
   return {id,role,x:at.x+(id%5-2)*8,y:at.y+(id%3-1)*7,view:'colony',trips:0,delivered:0,played:0,dir:0,hp:3,cross:0}
 }
@@ -11,25 +15,55 @@ export function createState() {
   reveal(state,GATE.field,185)
   return state
 }
+export const nurseries=state=>state.rooms.filter(r=>r.type==='queen'||r.type==='brood')
+export const broodCapacity=state=>nurseries(state).length*ROOM_LIMITS.brood
+export const layDelay=state=>Math.max(0,(state.nextLayAt??0)-state.time)
+export const guardCapacity=state=>state.portal.level+1+state.rooms.filter(r=>r.type==='barracks').length*ROOM_LIMITS.barracks
+export function broodLayout(state){
+  const rooms=nurseries(state), counts=new Map(rooms.map(r=>[cellKey(r),0]))
+  return state.brood.map(egg=>{
+    const saved=rooms.find(r=>cellKey(r)===egg.nursery&&counts.get(egg.nursery)<ROOM_LIMITS.brood)
+    const room=saved||rooms.find(r=>counts.get(cellKey(r))<ROOM_LIMITS.brood)||rooms[0]
+    if(!room)return {egg,room:ROYAL,slot:0}
+    const key=cellKey(room),slot=counts.get(key)
+    counts.set(key,slot+1)
+    return {egg,room,slot}
+  })
+}
+export function layIssue(state){
+  if(state.brood.length>=broodCapacity(state))return 'Couvées pleines. Aménage un couvain pour ajouter 3 places.'
+  if(layDelay(state)>0)return 'Prochain œuf dans '+Math.ceil(layDelay(state))+' s.'
+  if(state.stock.sugar<2)return 'Il faut 2 sucres pour pondre.'
+  return ''
+}
 export function lay(state,role) {
-  if(state.stock.sugar<2||state.brood.length>=6+state.rooms.filter(r=>r.type==='brood').length*10)return false
+  if(!['worker','soldier','scout'].includes(role)||layIssue(state))return false
+  const occupied=new Map()
+  for(const {room} of broodLayout(state))occupied.set(cellKey(room),(occupied.get(cellKey(room))||0)+1)
+  const room=nurseries(state).find(r=>(occupied.get(cellKey(r))||0)<ROOM_LIMITS.brood)
   state.stock.sugar-=2
-  state.brood.push({role,age:0,fed:false})
+  state.nextLayAt=state.time+LAY_INTERVAL
+  state.brood.push({role,age:0,fed:false,nursery:cellKey(room)})
   return true
 }
 export function ageBrood(state,dt) {
+  if(!state.brood.length){state.record=Math.max(state.record,state.ants.length);return 0}
   let born=0
-  for(const egg of state.brood) {
-    if(egg.age>=9&&!egg.fed&&state.stock.protein>=1){state.stock.protein--;egg.fed=true}
-    if(egg.age<9||egg.fed)egg.age+=dt
-  }
-  state.brood=state.brood.filter(egg=>{
-    if(egg.age<24||!egg.fed)return true
-    const at=state.rooms.find(r=>r.type==='brood')||ROYAL
-    state.ants.push(newAnt(state.nextId++,egg.role,at))
+  state.brood=broodLayout(state).filter(({egg,room})=>{
+    let remaining=dt
+    if(!egg.fed&&egg.age<LARVA_SECONDS){
+      const advance=Math.min(remaining,LARVA_SECONDS-egg.age)
+      egg.age+=advance;remaining-=advance
+    }
+    if(!egg.fed&&egg.age>=LARVA_SECONDS&&state.stock.protein>=1){
+      state.stock.protein--;egg.fed=true
+    }
+    if(egg.fed)egg.age+=remaining
+    if(egg.age+1e-8<HATCH_SECONDS||!egg.fed)return true
+    state.ants.push(newAnt(state.nextId++,egg.role,room))
     born++
     return false
-  })
+  }).map(item=>item.egg)
   state.record=Math.max(state.record,state.ants.length)
   return born
 }
@@ -61,28 +95,21 @@ export function finishRooms(state) {
   state.rooms.push(...ready)
   return ready.length
 }
+export const roomCost=type=>type==='barracks'?10:6
+export const snapRoom=p=>({x:Math.round(p.x/CELL)*CELL,y:Math.round(p.y/CELL)*CELL})
 export function roomIssue(state,type,p) {
-  const x=Math.round(p.x/CELL)*CELL,y=Math.round(p.y/CELL)*CELL
+  const site=snapRoom(p),{x,y}=site
   if(x<2*CELL||x>NEST.w-2*CELL||y<7*CELL||y>NEST.h-2*CELL)return 'Choisis un emplacement à l’intérieur du sous-sol.'
-  if([...state.rooms,...(state.roomProjects||[])].some(room=>dist(room,{x,y})<5*CELL))return 'Laisse au moins 5 blocs entre les centres des salles.'
-  const cost=type==='barracks'?10:6
+  if([...state.rooms,...(state.roomProjects||[])].some(room=>dist(snapRoom(room),site)<=4*CELL))return 'Laisse plus de 4 blocs entre les centres des salles, salle royale comprise.'
+  if(!excavated(state,site)||!nestRoute(state,GATE.colony,site).length)return 'Choisis une case déjà creusée et reliée au nid.'
+  const cost=roomCost(type)
   if(state.stock.earth<cost)return 'Il faut '+cost+' terres.'
   return ''
 }
 export function buildRoom(state,type,p) {
-  const site={x:Math.round(p.x/CELL)*CELL,y:Math.round(p.y/CELL)*CELL,radius:38,type}
-  const cost=type==='barracks'?10:6
-  if(!['brood','sugar','protein','barracks'].includes(type)||roomIssue(state,type,p))return false
-  if(nestRoute(state,GATE.colony,site).length)state.rooms.push(site)
-  else{
-    const start=state.tunnels.filter(t=>t.done&&nestRoute(state,GATE.colony,t).length)
-      .sort((a,b)=>dist(a,site)-dist(b,site))[0]
-    if(!start)return false
-    planDig(state,start,site)
-    state.roomProjects??=[]
-    state.roomProjects.push(site)
-  }
-  state.stock.earth-=cost
+  if(!Object.hasOwn(ROOM_LIMITS,type)||roomIssue(state,type,p))return false
+  state.rooms.push({...snapRoom(p),radius:38,type})
+  state.stock.earth-=roomCost(type)
   return true
 }
 export function addTrail(state,source,points=[]) {
@@ -91,8 +118,10 @@ export function addTrail(state,source,points=[]) {
   if(old)Object.assign(old,trail)
   else state.trails.push(trail)
 }
+export const BASE_STORAGE={sugar:36,protein:18}
+export const storageCapacity=(state,kind)=>kind==='earth'?Infinity:BASE_STORAGE[kind]+state.rooms.filter(r=>r.type===kind).length*ROOM_LIMITS[kind]
 export function storeResource(state,kind,amount) {
-  const capacity=kind==='earth'?Infinity:60+state.rooms.filter(r=>r.type===kind).length*65
+  const capacity=storageCapacity(state,kind)
   const added=Math.max(0,Math.min(amount,capacity-state.stock[kind]))
   state.stock[kind]+=added
   return added

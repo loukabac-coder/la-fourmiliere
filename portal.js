@@ -15,6 +15,13 @@ export function portalStep(state,dt) {
   if(first.view==='field')first.trips++
   gate.cooldown=1.3/[1,2,3][gate.level-1]
 }
+export const atPortal=ant=>dist(ant,GATE[ant.view])<=34
+export function requestCrossing(state,ant){
+  if(state.portal.closed||!atPortal(ant))return false
+  ant.move=null;ant.route=null
+  queueAtPortal(state,ant)
+  return true
+}
 export function queueAtPortal(state,ant) {
   ant.cross ||= ++state.queueId
   const others=state.ants.filter(other=>other.view===ant.view&&other.cross&&other.cross<ant.cross).length

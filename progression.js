@@ -1,5 +1,5 @@
 import {FIELD,GATE,dist,known,SOURCES} from './terrain.js'
-import {addTrail} from './colony.js'
+import {addTrail,guardCapacity} from './colony.js'
 export const MISSIONS={harvest:'Récolte',dig:'Creusement',guard:'Garde',scout:'Exploration'}
 export const FINDS=[
   {id:'bark',x:259,y:805,name:'Écorce creuse',amber:4},
@@ -37,9 +37,13 @@ export function restoreProgression(state){
 }
 export function availableAnts(state,type){
   const taken=new Set((state.missions||[]).flatMap(m=>m.members))
-  return state.ants.filter(a=>a.role!=='queen'&&!taken.has(a.id)&&
+  const free=state.ants.filter(a=>a.role!=='queen'&&!taken.has(a.id)&&
     (type==='guard'?a.role==='soldier':type==='scout'?a.role==='scout'||a.role==='worker':a.role==='worker'))
     .sort((a,b)=>type==='scout'?Number(b.role==='scout')-Number(a.role==='scout'):0)
+  if(type!=='guard')return free
+  const posted=new Set(guardIds(state))
+  const alreadyPosted=free.filter(a=>posted.has(a.id))
+  return [...alreadyPosted,...free.filter(a=>!posted.has(a.id)).slice(0,Math.max(0,guardCapacity(state)-posted.size))]
 }
 export function assignMission(state,type,count,target){
   restoreProgression(state)
@@ -58,7 +62,7 @@ export function assignMission(state,type,count,target){
 export function guardIds(state){
   const guards=new Set(state.portal.guards)
   for(const mission of state.missions||[])if(mission.type==='guard')for(const id of mission.members)guards.add(id)
-  return [...guards]
+  return [...guards].slice(0,guardCapacity(state))
 }
 export function activeGuards(state){
   const guards=new Set(guardIds(state))

@@ -19,6 +19,7 @@ test('five ants assemble to move heavy food',()=>{
   const s=createState()
   s.ants.push(newAnt(4,'worker'),newAnt(5,'worker'),newAnt(6,'worker'))
   s.nextId=7; s.stock.sugar=0
+  s.rooms.push({x:576,y:252,radius:38,type:'sugar'})
   addTrail(s,s.sources[2])
   for(let i=0;i<1100;i++)simulate(s,.05)
   assert.ok(s.ants.reduce((amount,a)=>amount+a.delivered,0)>=45)

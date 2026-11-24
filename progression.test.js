@@ -42,17 +42,18 @@ test('idle workers feed the colony while the queen remains selected',()=>{
   advance(s,65)
   assert.ok(s.dug>0&&s.stock.earth>0)
 })
-test('space between rooms is five cells and solid sites wait for excavation',()=>{
+test('a room requires an excavated tile more than four blocks from other rooms',()=>{
   const s=createState()
   s.stock.earth=40
-  assert.equal(buildRoom(s,'brood',{x:576+4*CELL,y:252}),false)
   const site={x:576+5*CELL,y:264}
-  assert.ok(buildRoom(s,'protein',site))
-  assert.equal(s.rooms.length,1)
-  assert.equal(s.roomProjects.length,1)
-  assert.equal(buildRoom(s,'sugar',{x:site.x+CELL,y:site.y}),false)
+  assert.equal(buildRoom(s,'protein',site),false)
+  assert.equal(s.stock.earth,40)
+  planDig(s,{x:576,y:264},site)
+  assert.equal(buildRoom(s,'protein',site),false)
   advance(s,70)
-  assert.equal(s.roomProjects.length,0)
+  assert.equal(buildRoom(s,'brood',{x:576+4*CELL,y:264}),false)
+  assert.ok(buildRoom(s,'protein',site))
+  assert.equal(buildRoom(s,'sugar',{x:site.x+CELL,y:site.y}),false)
   assert.ok(s.rooms.some(r=>r.type==='protein'&&r.x===site.x))
 })
 test('solid cells and diagonal corners block movement',()=>{

@@ -1,9 +1,9 @@
-import {createState,lay,planDig,buildRoom,roomIssue,addTrail,offline,DAY,NIGHT,storeResource,ROYAL} from './colony.js'
+import {createState,lay,planDig,buildRoom,roomIssue,roomCost,snapRoom,ROOM_LIMITS,broodCapacity,layIssue,layDelay,guardCapacity,storageCapacity,HATCH_SECONDS,LARVA_SECONDS,addTrail,offline,DAY,NIGHT,storeResource,ROYAL} from './colony.js'
 import {GATE,NEST,FIELD,dist,known,ROLE_NAMES,ROOM_NAMES,excavated,nestRoute} from './terrain.js'
 import {simulate} from './engine.js'
 import {manualDig,deliverCargo} from './ants.js'
 import {FINDS,MISSIONS,stats,award,restoreProgression,assignMission,availableAnts} from './progression.js'
-import {upgradePortal,LEVELS,queueAtPortal} from './portal.js'
+import {upgradePortal,LEVELS,atPortal,requestCrossing} from './portal.js'
 import {readSave,writeSave,clearSave,encodeSave,decodeSave} from './save.js'
 import {makeRenderer} from './render.js'
 const $=id=>document.getElementById(id)
@@ -11,7 +11,7 @@ const canvas=$('world'),dialog=$('dialog'),content=$('dialog-content')
 let state=null,renderer=null,mode=null,gesture=null,last=0,acc=0,lastSave=0,lastUi=0,noticeTimer
 let saved=readSave()
 const keys=new Set(),pointers=new Map()
-let pinch=0,pinchCenter=null,follow=true,cursor=null
+let pinch=0,pinchCenter=null,follow=true,cursor=null,buildType=null,buildSite=null
 function playLabel(){$('play').textContent=saved?'Continuer':'Jouer'}
 playLabel()
 function show(message,important=false) {
@@ -25,6 +25,7 @@ function save(){
   else $('notice').textContent='Sauvegarde locale indisponible. Exporte ta partie dans Options.'
 }
 function modal(title,text=''){
+  keys.clear()
   content.replaceChildren()
   const heading=document.createElement('h2');heading.textContent=title;content.append(heading)
   if(text){const p=document.createElement('p');p.textContent=text;content.append(p)}
@@ -41,7 +42,7 @@ function start(record) {
   state=record?.state||createState()
   restoreProgression(state)
   const report=record&&Date.now()-record.savedAt>30000?offline(state,(Date.now()-record.savedAt)/1000):null
-  last=0;acc=0;mode=null;follow=true;cursor=null;keys.clear()
+  last=0;acc=0;mode=null;buildType=null;buildSite=null;follow=true;cursor=null;keys.clear()
   for(const ant of state.ants){
     ant.route=null
     if(ant.view==='colony'&&!excavated(state,ant)){
@@ -58,18 +59,18 @@ function start(record) {
   else if(!record&&state.tutorial)guide()
 }
 function switchView(view,keep=false){
-  if(!keep&&state.ants.find(a=>a.id===state.selected)?.view!==view)state.selected=null
+  if(!keep&&state.ants.find(a=>a.id===state.selected)?.view!==view)releaseControl()
   state.view=view;mode=null;cursor=null;ui()
 }
+function stop(ant){if(ant)Object.assign(ant,{move:null,route:null,cross:0})}
+function releaseControl(){stop(state.ants.find(a=>a.id===state.selected));state.selected=null;keys.clear()}
 function select(ant) {
   if(!ant)return
-  const previous=state.ants.find(a=>a.id===state.selected)
-  if(previous){previous.move=null;previous.route=null;previous.cross=0}
-  keys.clear()
+  releaseControl()
   follow=true
-  state.selected=ant.id;ant.move=null;ant.cross=0;ant.route=null
+  state.selected=ant.id;stop(ant)
   switchView(ant.view,true)
-  tutorial('Indique une destination ou utilise ZQSD et les flèches. Touche le portail pour le traverser.')
+  tutorial('Indique une destination ou utilise ZQSD et les flèches. Approche-toi du portail puis appuie sur P pour traverser.')
 }
 function queen(){
   select(state.ants.find(a=>a.role==='queen'))
@@ -78,7 +79,7 @@ function ui(){
   if(!state)return
   const {stock,view,selected}=state
   const actor=state.ants.find(a=>a.id===selected)
-  $('resources').textContent='Fourmis '+state.ants.length+'  ·  Sucre '+Math.floor(stock.sugar)+'  ·  Protéines '+Math.floor(stock.protein)+'  ·  Terre '+Math.floor(stock.earth)+'  ·  Ambre '+(state.amber||0)
+  $('resources').textContent='Fourmis '+state.ants.length+'  ·  Sucre '+Math.floor(stock.sugar)+'/'+storageCapacity(state,'sugar')+'  ·  Protéines '+Math.floor(stock.protein)+'/'+storageCapacity(state,'protein')+'  ·  Terre '+Math.floor(stock.earth)+'  ·  Ambre '+(state.amber||0)
   const goal=state.record>=30&&state.raidWon
   const task=goal?'Objectif atteint · Record '+state.record:
     state.raid?'Urgence · '+(state.raid.kind==='rival'?'Raid rival':'Scarabée')+' · Protège le portail':
@@ -92,11 +93,20 @@ function ui(){
   $('management').hidden=false;$('manual').hidden=!actor
   $('dig-request').hidden=view!=='colony'||!state.digProposal
   $('lay').disabled=!!actor&&actor.role!=='queen'
+  $('brood-status').hidden=view!=='colony'
+  const eldest=state.brood.reduce((max,egg)=>!max||egg.age>max.age?egg:max,null)
+  const hatch=eldest?(eldest.age>=LARVA_SECONDS&&!eldest.fed?' · Larve en attente de protéines':' · Naissance ~'+Math.ceil(HATCH_SECONDS-eldest.age)+' s'):''
+  $('brood-status').textContent='Couvées '+state.brood.length+'/'+broodCapacity(state)+(layDelay(state)>0?' · Ponte '+Math.ceil(layDelay(state))+' s':'')+hatch
+  $('build-actions').hidden=mode!=='build'
+  const constructionIssue=mode==='build'&&buildSite?roomIssue(state,buildType,buildSite):''
+  $('build-status').textContent=mode==='build'?(ROOM_NAMES[buildType]+' · '+(constructionIssue||(!buildSite?'Choisis une case creusée':roomCost(buildType)+' terres'))):''
+  $('build-confirm').disabled=!buildSite||!!constructionIssue
+  $('cross').disabled=!actor||!atPortal(actor)||state.portal.closed
   $('energy').hidden=!actor||view!=='colony'
   $('energy').value=actor?.energy??100
   $('actor-status').textContent=actor?'Contrôle · '+ROLE_NAMES[actor.role]+' · Niv. '+stats(actor).level:'Vue de gestion'
   $('orders').textContent='Missions · J'+(state.missions.length?' ('+state.missions.length+')':'')
-  for(const id of ['role','lay','dig','room','build'])$(id).hidden=view!=='colony'
+  for(const id of ['role','lay','dig','build'])$(id).hidden=view!=='colony'
   $('trail').hidden=view!=='field'
   $('carry').hidden=!actor||actor.role==='queen'
   $('excavate').hidden=view!=='colony'
@@ -106,8 +116,8 @@ function ui(){
 function guide(){
   modal('Guide de la colonie','Ton but : faire grandir la colonie jusqu’à 30 fourmis, puis repousser le raid rival.')
   const steps=[
-    ['Élever le couvain','Choisis une ouvrière pour les travaux, une soldate pour la garde ou une éclaireuse pour explorer, puis Pondre. Les larves ont besoin de protéines pour grandir.'],
-    ['Creuser et aménager','Active Creuser, puis glisse depuis une galerie vers la terre. Les ouvrières creusent et rapportent la terre. Accepte une demande de creusement ou choisis le tracé. Place une salle à cinq blocs des autres salles. Coût : 6 terres, ou 10 pour une caserne.'],
+    ['Élever le couvain','Choisis une ouvrière pour les travaux, une soldate pour la garde ou une éclaireuse pour explorer, puis Pondre. Il y a trois places par couvain, un œuf au maximum toutes les 30 secondes et environ trois minutes avant la naissance. Les larves ont besoin de protéines.'],
+    ['Creuser et aménager','Active Creuser, puis glisse depuis une galerie vers la terre. Les ouvrières creusent et rapportent la terre. Accepte une demande de creusement ou choisis le tracé. Appuie sur B, choisis une structure, puis clique sur une case creusée à plus de quatre blocs d’une autre salle. Valide l’aperçu avec Entrée.'],
     ['Récolter au jardin','Les ouvrières récoltent près du portail sans ordre. Touche une ressource visible pour tracer une autre piste. Avec une fourmi incarnée, appuie sur C près des graines pour les récupérer. La pomme demande cinq fourmis.'],
     ['Défendre le portail','Ouvre Portail pour fermer l’entrée et poster des soldates près du passage. Les gardes aident à neutraliser les attaques ; améliore le portail pour renforcer la défense.'],
     ['Explorer et contrôler','Touche une fourmi pour l’incarner. Déplace-la avec ZQSD, WASD ou les flèches ; touche une destination sur la carte. Fais glisser la carte ou défile à deux doigts pour déplacer la caméra. Pince pour zoomer. Appuie sur G pour incarner la reine.']
@@ -157,8 +167,8 @@ function portalMenu() {
     if(upgradePortal(state)){save();portalMenu()}else detail('Réserves insuffisantes.')
   })
   const assigned=state.ants.filter(a=>a.role==='soldier'&&a.view==='colony')
-  detail('Garde · '+gate.guards.length+'/'+(gate.level+1))
-  button('Poster des soldates',()=>{gate.guards=assigned.slice(0,gate.level+1).map(a=>a.id);save();portalMenu()})
+  detail('Garde · '+gate.guards.length+'/'+guardCapacity(state))
+  button('Poster des soldates',()=>{gate.guards=assigned.slice(0,guardCapacity(state)).map(a=>a.id);save();portalMenu()})
   if(gate.guards.length)button('Rappeler la garde',()=>{gate.guards=[];save();portalMenu()})
   const scout=state.ants.find(a=>a.role==='scout'&&a.view==='colony'&&!a.explore)
   if(scout)button('Envoyer une éclaireuse',()=>{scout.explore=true;save();portalMenu()})
@@ -280,7 +290,7 @@ function carry(){
   if(a.cargo){
     if(a.view==='colony'){
       const room=state.rooms.find(r=>r.type===a.cargo.kind&&dist(a,r)<r.radius+18)
-      if(room||dist(a,ROYAL)<ROYAL.radius)deliverCargo(state,a)
+      if(room||dist(a,ROYAL)<ROYAL.radius){if(!deliverCargo(state,a)){show('Réserve pleine. Construis une autre salle de stockage.');return}}
       else{show('Va dans un grenier ou dans la salle royale pour déposer.');return}
     }
     a.cargo=null;save()
@@ -296,9 +306,14 @@ $('help').onclick=guide
 $('orders').onclick=orders
 $('options').onclick=$('home-options').onclick=options
 $('portal').onclick=portalMenu
-$('lay').onclick=()=>{if(lay(state,$('role').value))show('Un œuf a été pondu. Les larves consomment une protéine.',true);else show('Il faut 2 sucres et une place pour le couvain.')}
+$('lay').onclick=()=>{if(lay(state,$('role').value))show('Œuf pondu. Naissance dans environ 3 min avec 1 protéine disponible.',true);else show(layIssue(state))}
 $('dig').onclick=()=>setMode('dig','Glisse depuis une galerie ou une chambre vers la terre à creuser.')
-$('build').onclick=()=>setMode('build','Choisis un emplacement à 5 blocs ou plus des autres salles, même dans la terre.')
+$('build').onclick=()=>{
+  if(state.view!=='colony')return
+  modal('Construire une structure','Choisis le type de salle. Le jeu te montrera un aperçu avant confirmation.')
+  const effects={brood:'+3 places pour les œufs',sugar:'+36 places de sucre',protein:'+24 places de protéines',barracks:'+3 places de garde'}
+  for(const type of Object.keys(ROOM_LIMITS))button(ROOM_NAMES[type]+' · '+roomCost(type)+' terres · '+effects[type],()=>chooseRoom(type))
+}
 $('dig-request').onclick=()=>{
   const proposal=state.digProposal
   if(!proposal)return
@@ -372,7 +387,7 @@ canvas.addEventListener('pointermove',e=>{
     else if(mode==='trail'){
       const point=renderer.world(at.x,at.y)
       if(gesture.points.length<90&&dist(gesture.points.at(-1)||gesture.start,point)>12)gesture.points.push(point)
-    }else if(!mode||mode==='scout-order'){pan(gesture.last.x-at.x,gesture.last.y-at.y)}
+    }else if(!mode||mode==='scout-order'||mode==='build'){pan(gesture.last.x-at.x,gesture.last.y-at.y)}
   }
   gesture.last=at
 })
@@ -401,13 +416,7 @@ canvas.addEventListener('pointerup',e=>{
     return
   }
   if(mode==='build'){
-    const type=$('room').value
-    const issue=roomIssue(state,type,p)
-    const previous=state.roomProjects?.length||0
-    const built=!issue&&buildRoom(state,type,p)
-    if(built){mode=null;ui()}
-    const queued=(state.roomProjects?.length||0)>previous
-    show(built?(queued?'Chantier autorisé. Les ouvrières vont raccorder la salle.':ROOM_NAMES[type]+' aménagé.'):issue||'Impossible de raccorder cet emplacement.',built)
+    if(!g.moved){buildSite=snapRoom(p);ui()}
     return
   }
   if(mode==='trail'){
@@ -418,8 +427,9 @@ canvas.addEventListener('pointerup',e=>{
   if(g.moved)return
   const selected=state.ants.find(a=>a.id===state.selected)
   if(dist(p,gate)<29){
-    if(selected)crossPortal()
-    else portalMenu()
+    if(!selected)portalMenu()
+    else if(atPortal(selected))crossPortal()
+    else{selected.cross=0;selected.move={...gate};follow=true}
     return
   }
   const ant=state.ants.filter(a=>a.view===view&&a.id!==state.selected&&dist(a,p)<(a.role==='queen'?28:14)).sort((a,b)=>dist(a,p)-dist(b,p))[0]
@@ -432,17 +442,16 @@ canvas.addEventListener('pointerup',e=>{
 const controls=new Set(['z','q','s','d','w','a','arrowleft','arrowright','arrowup','arrowdown'])
 window.addEventListener('keydown',e=>{
   const key=e.key.toLowerCase()
-  if(controls.has(key)&&state&&!dialog.open&&!['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)){
+  if(controls.has(key)&&state&&!e.repeat&&!dialog.open&&!['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)){
     e.preventDefault();keys.add(key);follow=true
   }
 })
 function crossPortal(){
   const ant=state.ants.find(a=>a.id===state.selected)
-  if(!ant){portalMenu();return}
-  const gate=GATE[ant.view]
-  ant.move={...gate,portal:true};follow=true
-  if(dist(ant,gate)<4)queueAtPortal(state,ant)
-  if(state.portal.closed)show('Portail fermé. Ouvre-le depuis le tableau des départs.')
+  if(!ant){show('Incarne une fourmi près du portail pour traverser.');return}
+  if(state.portal.closed){show('Portail fermé. Ouvre-le depuis le tableau des départs.');return}
+  if(!requestCrossing(state,ant)){show('Approche-toi du portail, puis appuie sur P.');return}
+  keys.clear();follow=true
 }
 function excavate(){
   if(state.view!=='colony')return
@@ -454,15 +463,38 @@ function excavate(){
 }
 function chooseRoom(type){
   if(state.view!=='colony')return
-  $('room').value=type
-  if(mode!=='build')$('build').click()
+  if(dialog.open)dialog.close()
+  buildType=type;buildSite=null;mode='build'
+  stop(state.ants.find(a=>a.id===state.selected))
+  keys.clear();ui()
+  show('Clique sur une case creusée, puis confirme avec Entrée.')
 }
+function placementPreview(){
+  if(mode!=='build')return null
+  const point=buildSite||cursor
+  return point?{type:buildType,...snapRoom(point),issue:roomIssue(state,buildType,point)}:{type:buildType}
+}
+function confirmBuild(){
+  if(mode!=='build'||!buildSite)return
+  const issue=roomIssue(state,buildType,buildSite)
+  if(issue){show(issue);return}
+  if(buildRoom(state,buildType,buildSite)){
+    mode=null;buildSite=null;ui()
+    show(ROOM_NAMES[buildType]+' aménagé.',true)
+  }
+}
+function cancelBuild(){
+  if(mode!=='build')return
+  mode=null;buildSite=null;ui()
+}
+$('build-confirm').onclick=confirmBuild
+$('build-cancel').onclick=cancelBuild
 const shortcuts={
   e:()=>state.view==='colony'&&(state.selected===null||state.selected===0)&&$('lay').click(),
   f:excavate,b:()=>state.view==='colony'&&$('build').click(),r:()=>$('random').click(),
   h:()=>$('event').click(),p:crossPortal,o:portalMenu,c:carry,x:action,g:queen,i:hero,j:orders,
   t:()=>state.view==='field'&&$('trail').click(),v:()=>switchView(state.view==='colony'?'field':'colony'),
-  m:()=>{pan(0,0);state.selected=null;mode=null;ui()},
+  m:()=>{pan(0,0);releaseControl();mode=null;ui()},enter:confirmBuild,escape:cancelBuild,
   '1':()=>chooseRoom('brood'),'2':()=>chooseRoom('sugar'),'3':()=>chooseRoom('protein'),'4':()=>chooseRoom('barracks'),
   '+':()=>zoom(1.25),'-':()=>zoom(.8)
 }
@@ -471,6 +503,7 @@ $('excavate').onclick=excavate
 window.addEventListener('keydown',e=>{
   const key=e.key.toLowerCase()
   if(!state||!Object.hasOwn(shortcuts,key)||dialog.open||e.altKey||e.ctrlKey||e.metaKey||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return
+  if((key==='enter'||key==='escape')&&mode!=='build')return
   e.preventDefault()
   if(!e.repeat||key==='f')shortcuts[key]()
 })
@@ -505,7 +538,7 @@ function frame(now){
           switchView(actor.view,true);save()
         }
       }
-      renderer.draw(state,now/1000,follow,cursor)
+      renderer.draw(state,now/1000,follow,cursor,placementPreview())
       if(now-lastUi>200){ui();lastUi=now}
       if(now-lastSave>=10000)save()
     }

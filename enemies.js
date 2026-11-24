@@ -1,4 +1,4 @@
-import {GATE,dist} from './terrain.js'
+import {FIELD,GATE,dist} from './terrain.js'
 import {DAY,NIGHT} from './colony.js'
 const rivalGate={x:1115,y:885}
 function approach(actor,target,amount) {
@@ -11,7 +11,39 @@ function kill(state,ant) {
   if(state.selected===ant.id)state.selected=null
   if(ant.name||ant.played>15)state.memorial.push({...ant})
 }
+export function updateWildlife(s,dt,emit) {
+  s.wildlife??=[
+    {kind:'guêpe',x:1270,y:630,homeX:1270,homeY:630,speed:98,range:115,hp:3},
+    {kind:'carabe',x:615,y:1005,homeX:615,homeY:1005,speed:59,range:115,hp:5},
+    {kind:'guêpe',x:385,y:520,homeX:385,homeY:520,speed:93,range:115,hp:3}
+  ]
+  for(const animal of s.wildlife) {
+    if(animal.hp<=0)continue
+    animal.cooldown=Math.max(0,(animal.cooldown||0)-dt)
+    const prey=s.ants.filter(a=>a.view==='field'&&a.role!=='queen'&&dist(a,animal)<animal.range)
+      .sort((a,b)=>dist(a,animal)-dist(b,animal))[0]
+    const offset=animal.homeX/100
+    const patrol={x:animal.homeX+Math.cos(s.time*.13+offset)*68,y:animal.homeY+Math.sin(s.time*.17+offset)*54}
+    animal.chasing=!!prey
+    approach(animal,prey||patrol,dt*(prey?animal.speed:animal.speed*.38))
+    if(prey&&!animal.cooldown&&dist(prey,animal)<17){
+      animal.cooldown=2
+      prey.hp--
+      if(prey.hp<=0){kill(s,prey);emit('Une fourmi a été attrapée par '+(animal.kind==='guêpe'?'une guêpe.':'un carabe.'),true)}
+    }
+  }
+  for(const source of s.sources){
+    if(![3,4,5].includes(source.id))continue
+    source.originX??=source.x;source.originY??=source.y
+    const radius=source.id===4?68:source.id===3?(s.rain?44:24):36
+    source.x=Math.min(FIELD.w-30,Math.max(30,source.originX+Math.sin(s.time*.09+source.id)*radius))
+    source.y=Math.min(FIELD.h-30,Math.max(30,source.originY+Math.cos(s.time*.065+source.id)*radius))
+    const trail=s.trails.find(t=>t.source===source.id)
+    if(trail)Object.assign(trail.points.at(-1),{x:source.x,y:source.y})
+  }
+}
 export function updateEnemies(s,dt,emit) {
+  updateWildlife(s,dt,emit)
   const night=s.time%DAY>NIGHT
   const trail=s.trails.find(t=>t.points.some(p=>dist(p,GATE.field)>230))
   const target=s.spider.lure||((night&&trail)?trail.points.at(-1):{x:1070,y:555})

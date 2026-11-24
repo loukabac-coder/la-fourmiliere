@@ -1,4 +1,4 @@
-import {GATE,FIELD,NEST,dist,nestRoute,reveal} from './terrain.js'
+import {CELL,GATE,FIELD,NEST,dist,nestRoute,reveal,excavated,cellKey} from './terrain.js'
 import {queueAtPortal} from './portal.js'
 import {ROYAL,storeResource} from './colony.js'
 export const speedOf = ant=>ant.role==='scout'?108:ant.role==='soldier'?65:73
@@ -34,6 +34,8 @@ function dig(state,ant,tunnel,dt) {
 }
 export function applyManual(state,ant,dt,input) {
   ant.played+=dt
+  ant.energy=Math.min(100,(ant.energy??100)+dt*7)
+  if(ant.cross&&(input.x||input.y))ant.cross=0
   if(ant.cross) {
     moveAnt(state,ant,queueAtPortal(state,ant),dt)
     return
@@ -91,8 +93,8 @@ export function updateAnts(state,dt,input) {
         continue
       }
       if(ant.job!==job.source.id){ant.job=job.source.id;ant.waypoint=0}
-      const next=job.trail.points[ant.waypoint]
-      if(next&&moveAnt(state,ant,next,dt)){ant.waypoint++;job.trail.strength=Math.min(1,job.trail.strength+.045)}
+      const next=job.trail.points[ant.waypoint]||job.source
+      if(next&&moveAnt(state,ant,next,dt)){ant.waypoint=Math.min(ant.waypoint+1,job.trail.points.length);job.trail.strength=Math.min(1,job.trail.strength+.045)}
       continue
     }
     if(ant.cargo) {
@@ -128,10 +130,15 @@ export function updateAnts(state,dt,input) {
     }
   }
 }
-export function manualDig(state,ant) {
-  if(ant.view!=='colony')return false
-  const tunnel=state.tunnels.find(t=>!t.done&&dist(ant,t)<45)
-  if(!tunnel)return false
+export function manualDig(state,ant,point) {
+  if(ant.view!=='colony'||(ant.energy??100)<18)return false
+  const target=point?{x:Math.round(point.x/CELL)*CELL,y:Math.round(point.y/CELL)*CELL}:state.tunnels.find(t=>!t.done&&dist(ant,t)<45)
+  if(!target||dist(ant,target)>63||target.x<CELL||target.x>NEST.w-CELL||target.y<120||target.y>NEST.h-CELL)return false
+  const adjacent=[[CELL,0],[-CELL,0],[0,CELL],[0,-CELL]].some(([dx,dy])=>excavated(state,{x:target.x+dx,y:target.y+dy}))
+  let tunnel=state.tunnels.find(t=>cellKey(t)===cellKey(target))
+  if(tunnel?.done||!adjacent||(!tunnel&&excavated(state,target)))return false
+  if(!tunnel){tunnel={...target,done:false,work:0};state.tunnels.push(tunnel)}
+  ant.energy=(ant.energy??100)-18
   tunnel.work+=.8
   if(tunnel.work>=1.4){tunnel.done=true;state.dug++;ant.earth=(ant.earth||0)+3}
   return true

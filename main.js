@@ -10,7 +10,7 @@ const canvas=$('world'),dialog=$('dialog'),content=$('dialog-content')
 let state=null,renderer=null,mode=null,gesture=null,last=0,acc=0,lastSave=0,lastUi=0,noticeTimer
 let saved=readSave()
 const keys=new Set(),pointers=new Map()
-let pinch=0
+let pinch=0,pinchCenter=null,follow=true,cursor=null
 function playLabel(){$('play').textContent=saved?'Continuer':'Jouer'}
 playLabel()
 function show(message,important=false) {
@@ -39,7 +39,7 @@ function tutorial(text){if(state.tutorial)show(text)}
 function start(record) {
   state=record?.state||createState()
   const report=record&&Date.now()-record.savedAt>30000?offline(state,(Date.now()-record.savedAt)/1000):null
-  last=0;acc=0;mode=null
+  last=0;acc=0;mode=null;follow=true;cursor=null
   $('home').hidden=true;$('game').hidden=false
   renderer??=makeRenderer(canvas,$('minimap'))
   if(dialog.open)dialog.close()
@@ -49,18 +49,17 @@ function start(record) {
 }
 function switchView(view,keep=false){
   if(!keep&&state.ants.find(a=>a.id===state.selected)?.view!==view)state.selected=null
-  state.view=view;mode=null;ui()
+  state.view=view;mode=null;cursor=null;ui()
 }
 function select(ant) {
   if(!ant)return
-  if(ant.role==='queen'){queen();return}
+  follow=true
   state.selected=ant.id;ant.move=null;ant.cross=0
   switchView(ant.view,true)
   tutorial('Indique une destination ou utilise ZQSD et les flèches. Touche le portail pour le traverser.')
 }
 function queen(){
-  state.selected=null;Object.assign(state.camera.colony,{x:ROYAL.x,y:ROYAL.y,zoom:1})
-  switchView('colony')
+  select(state.ants.find(a=>a.role==='queen'))
 }
 function ui(){
   if(!state)return
@@ -77,10 +76,14 @@ function ui(){
     (view==='field'?' · '+(state.rain?'Pluie':state.time%DAY>NIGHT?'Nuit':'Jour'):'')+(actor?' · '+(actor.name||ROLE_NAMES[actor.role]):'')
   $('minimap').setAttribute('aria-label','Centrer la vue sur '+(view==='colony'?'le nid':'le jardin'))
   for(const b of document.querySelectorAll('[data-view]'))b.setAttribute('aria-pressed',String(b.dataset.view===view))
-  $('management').hidden=!!actor;$('manual').hidden=!actor
+  $('management').hidden=!!actor&&actor.role!=='queen';$('manual').hidden=!actor
+  $('energy').hidden=!actor||view!=='colony'
+  $('energy').value=actor?.energy??100
+  $('actor-status').textContent=actor?'Contrôle · '+ROLE_NAMES[actor.role]:'Vue de gestion'
   for(const id of ['role','lay','dig','room','build'])$(id).hidden=view!=='colony'
   $('trail').hidden=view!=='field'
   $('carry').hidden=actor?.role!=='worker'
+  $('excavate').hidden=view!=='colony'
   $('action').textContent=actor?.role==='soldier'?'Attaquer':actor?.role==='scout'?'Alerter':view==='colony'?'Creuser / déposer':'Poser une piste'
   for(const id of ['dig','build','trail'])$(id).setAttribute('aria-pressed',String(mode===id))
 }
@@ -91,7 +94,7 @@ function guide(){
     ['Creuser et aménager','Active Creuser, puis glisse depuis une galerie vers la terre. Les ouvrières creusent et rapportent la terre. Choisis ensuite une chambre et touche une galerie creusée pour la construire : 6 terres, ou 10 pour une caserne.'],
     ['Récolter au jardin','Passe sur Terrain et touche une ressource visible pour tracer une piste. Les ouvrières la suivront et rapporteront la nourriture automatiquement. La pomme demande cinq fourmis.'],
     ['Défendre le portail','Ouvre Portail pour fermer l’entrée et poster des soldates près du passage. Les gardes aident à neutraliser les attaques ; améliore le portail pour renforcer la défense.'],
-    ['Explorer et contrôler','Touche une fourmi pour l’incarner. Déplace-la avec ZQSD, WASD ou les flèches ; touche une destination sur la carte. Sans fourmi incarnée, glisse pour déplacer la caméra ; pince pour zoomer. Retour à la reine recentre le nid.']
+    ['Explorer et contrôler','Touche une fourmi pour l’incarner. Déplace-la avec ZQSD, WASD ou les flèches ; touche une destination sur la carte. Fais glisser la carte ou défile à deux doigts pour déplacer la caméra. Pince pour zoomer. Appuie sur G pour incarner la reine.']
   ]
   const list=document.createElement('ol')
   for(const [title,text] of steps){
@@ -160,9 +163,10 @@ function action(){
   const a=state.ants.find(ant=>ant.id===state.selected)
   if(!a)return
   if(a.role==='soldier'){
-    const target=[state.raid,state.spider].find(e=>e&&a.view==='field'&&dist(a,e)<54)
+    const target=[state.raid,...(state.wildlife||[]).filter(e=>e.hp>0),state.spider].find(e=>e&&a.view==='field'&&dist(a,e)<54)
     if(target===state.raid&&target)target.hp-=5
-    else if(target)state.spider.lure={x:1070,y:555}
+    else if(target===state.spider)state.spider.lure={x:1070,y:555}
+    else if(target){target.hp-=2;if(target.hp<=0) show('Prédateur repoussé.',true)}
     else show('Approche-toi d’un ennemi pour attaquer.')
   }else if(a.role==='scout'){
     show('Zone explorée signalée.')
@@ -220,49 +224,66 @@ $('minimap').onclick=e=>{
   const bounds=state.view==='colony'?NEST:FIELD,rect=e.currentTarget.firstElementChild.getBoundingClientRect()
   const x=e.detail?(e.clientX-rect.left)/rect.width:.5
   const y=e.detail?(e.clientY-rect.top)/rect.height:.5
-  state.selected=null
+  follow=false
   Object.assign(state.camera[state.view],{
     x:x*bounds.w,
     y:y*bounds.h
   })
   ui()
 }
-canvas.addEventListener('wheel',e=>{e.preventDefault();zoom(e.deltaY<0?1.13:.88)},{passive:false})
+function pan(dx,dy){
+  const camera=state.camera[state.view],bounds=state.view==='colony'?NEST:FIELD
+  const ant=state.ants.find(a=>a.id===state.selected)
+  if(follow&&ant?.view===state.view){camera.x=ant.x;camera.y=ant.y}
+  follow=false
+  const scale=renderer.zoomScale()
+  camera.x=Math.max(0,Math.min(bounds.w,camera.x+dx/scale))
+  camera.y=Math.max(0,Math.min(bounds.h,camera.y+dy/scale))
+}
+canvas.addEventListener('wheel',e=>{
+  if(!state)return
+  e.preventDefault()
+  const unit=e.deltaMode===1?16:e.deltaMode===2?canvas.clientHeight:1
+  if(e.ctrlKey||e.metaKey)zoom(Math.exp(-e.deltaY*.012))
+  else pan(e.shiftKey&&!e.deltaX?e.deltaY*unit:e.deltaX*unit,e.shiftKey&&!e.deltaX?0:e.deltaY*unit)
+},{passive:false})
 const pointer=e=>{const r=canvas.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top}}
 canvas.addEventListener('pointerdown',e=>{
   if(!state)return
   canvas.setPointerCapture(e.pointerId)
   const at=pointer(e);pointers.set(e.pointerId,at)
-  if(pointers.size>1){const [a,b]=pointers.values();pinch=dist(a,b);gesture=null;return}
-  gesture={at,last:at,start:renderer.world(at.x,at.y),points:[],moved:false}
+  if(pointers.size>1){const [a,b]=pointers.values();pinch=dist(a,b);pinchCenter={x:(a.x+b.x)/2,y:(a.y+b.y)/2};gesture=null;return}
+  gesture={at,last:at,start:renderer.world(at.x,at.y),points:[],moved:false,pan:e.button===1||e.button===2}
 })
 canvas.addEventListener('pointermove',e=>{
+  if(state){const at=pointer(e);cursor=renderer.world(at.x,at.y)}
   if(!pointers.has(e.pointerId))return
   const at=pointer(e);pointers.set(e.pointerId,at)
   if(pointers.size>1){
     const [a,b]=pointers.values(),gap=dist(a,b)
+    const center={x:(a.x+b.x)/2,y:(a.y+b.y)/2}
+    if(pinchCenter)pan(pinchCenter.x-center.x,pinchCenter.y-center.y)
     if(pinch>4&&gap>4)zoom(gap/pinch)
-    pinch=gap;return
+    pinchCenter=center;pinch=gap;return
   }
   if(!gesture)return
   gesture.moved ||= dist(at,gesture.at)>8
   if(gesture.moved){
-    if(mode==='trail'){
+    if(gesture.pan){pan(gesture.last.x-at.x,gesture.last.y-at.y)}
+    else if(mode==='trail'){
       const point=renderer.world(at.x,at.y)
       if(gesture.points.length<90&&dist(gesture.points.at(-1)||gesture.start,point)>12)gesture.points.push(point)
-    }else if(!mode&&state.selected===null){
-      const cam=state.camera[state.view],b=state.view==='colony'?NEST:FIELD,scale=renderer.zoomScale()
-      cam.x=Math.max(0,Math.min(b.w,cam.x-(at.x-gesture.last.x)/scale))
-      cam.y=Math.max(0,Math.min(b.h,cam.y-(at.y-gesture.last.y)/scale))
-    }
+    }else if(!mode){pan(gesture.last.x-at.x,gesture.last.y-at.y)}
   }
   gesture.last=at
 })
+canvas.addEventListener('contextmenu',e=>e.preventDefault())
 canvas.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);gesture=null})
 canvas.addEventListener('pointerup',e=>{
   pointers.delete(e.pointerId)
   if(!gesture)return
   const g=gesture;gesture=null
+  if(g.pan)return
   const at=pointer(e),p=renderer.world(at.x,at.y),view=state.view,gate=GATE[view]
   const source=view==='field'&&state.sources.find(s=>known(state,s)&&dist(s,p)<37)
   if(mode==='dig'){
@@ -284,14 +305,14 @@ canvas.addEventListener('pointerup',e=>{
   if(g.moved)return
   const selected=state.ants.find(a=>a.id===state.selected)
   if(dist(p,gate)<29){
-    if(selected){selected.move={...gate,portal:true};if(dist(selected,gate)<4)queueAtPortal(state,selected)}
+    if(selected)crossPortal()
     else portalMenu()
     return
   }
   const ant=state.ants.filter(a=>a.view===view&&a.id!==state.selected&&dist(a,p)<(a.role==='queen'?28:14)).sort((a,b)=>dist(a,p)-dist(b,p))[0]
   if(ant){select(ant);return}
   if(selected){
-    selected.cross=0;selected.move=p
+    selected.cross=0;selected.move=p;follow=true
     if(view==='field'&&dist(selected,state.spider)<75)state.spider.lure={...p}
   }else if(source){addTrail(state,source);show('Piste vers '+source.name.toLowerCase()+'.',true)}
 })
@@ -299,8 +320,46 @@ const controls=new Set(['z','q','s','d','w','a','arrowleft','arrowright','arrowu
 window.addEventListener('keydown',e=>{
   const key=e.key.toLowerCase()
   if(controls.has(key)&&state&&!dialog.open&&!['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)){
-    e.preventDefault();keys.add(key)
+    e.preventDefault();keys.add(key);follow=true
   }
+})
+function crossPortal(){
+  const ant=state.ants.find(a=>a.id===state.selected)
+  if(!ant){portalMenu();return}
+  const gate=GATE[ant.view]
+  ant.move={...gate,portal:true};follow=true
+  if(dist(ant,gate)<4)queueAtPortal(state,ant)
+  if(state.portal.closed)show('Portail fermé. Ouvre-le depuis le tableau des départs.')
+}
+function excavate(){
+  if(state.view!=='colony')return
+  const ant=state.ants.find(a=>a.id===state.selected)
+  if(!ant){$('dig').click();return}
+  if((ant.energy??100)<18){show('Énergie basse. Attends quelques secondes.');return}
+  const point=cursor||{x:ant.x+Math.cos(ant.dir||0)*48,y:ant.y+Math.sin(ant.dir||0)*48}
+  if(!manualDig(state,ant,point))show('Vise de la terre près de ta fourmi, au bord d’une galerie.')
+}
+function chooseRoom(type){
+  if(state.view!=='colony')return
+  $('room').value=type
+  if(mode!=='build')$('build').click()
+}
+const shortcuts={
+  e:()=>state.view==='colony'&&(state.selected===null||state.selected===0)&&$('lay').click(),
+  f:excavate,b:()=>state.view==='colony'&&$('build').click(),r:()=>$('random').click(),
+  h:()=>$('event').click(),p:crossPortal,o:portalMenu,c:carry,x:action,g:queen,i:hero,
+  t:()=>state.view==='field'&&$('trail').click(),v:()=>switchView(state.view==='colony'?'field':'colony'),
+  m:()=>{pan(0,0);state.selected=null;mode=null;ui()},
+  '1':()=>chooseRoom('brood'),'2':()=>chooseRoom('sugar'),'3':()=>chooseRoom('protein'),'4':()=>chooseRoom('barracks'),
+  '+':()=>zoom(1.25),'-':()=>zoom(.8)
+}
+$('cross').onclick=crossPortal
+$('excavate').onclick=excavate
+window.addEventListener('keydown',e=>{
+  const key=e.key.toLowerCase()
+  if(!state||!Object.hasOwn(shortcuts,key)||dialog.open||e.altKey||e.ctrlKey||e.metaKey||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return
+  e.preventDefault()
+  if(!e.repeat||key==='f')shortcuts[key]()
 })
 window.addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()))
 window.addEventListener('blur',()=>keys.clear())
@@ -333,7 +392,7 @@ function frame(now){
           switchView(actor.view,true);save()
         }
       }
-      renderer.draw(state,now/1000)
+      renderer.draw(state,now/1000,follow,cursor)
       if(now-lastUi>200){ui();lastUi=now}
       if(now-lastSave>=10000)save()
     }

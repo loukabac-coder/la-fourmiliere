@@ -1,4 +1,4 @@
-import {GATE,NEST,FIELD,ROOM_NAMES,known} from './terrain.js'
+import {CELL,GATE,NEST,FIELD,ROOM_NAMES,known,dist} from './terrain.js'
 import {DAY,NIGHT} from './colony.js'
 import {rivalGate} from './enemies.js'
 const colors={sugar:'#fac243',protein:'#da6340',brood:'#fff1c5',queen:'#f8a42f',barracks:'#d26d42'}
@@ -45,6 +45,18 @@ function landscape(kind) {
       else if(i%7===0){oval(c,x,y,11,7,'#6d7061');rect(c,x-4,y-6,7,3,'#94917a')}
       else{rect(c,x,y,3,10,'#75843c');rect(c,x+4,y-3,3,12,'#556e31')}
     }
+    for(const [x,y,rx,ry] of [[491,588,58,23],[912,761,72,33],[765,1008,87,39],[1031,326,90,38]]){
+      oval(c,x+6,y+8,rx+10,ry+8,'#263e32')
+      oval(c,x,y,rx,ry,'#3e6970')
+      oval(c,x-4,y-4,rx*.82,ry*.71,'#527f81')
+      rect(c,x-rx*.45,y-ry*.25,rx*.7,3,'#769699')
+    }
+    for(const [x,y] of [[485,800],[850,572],[960,917],[620,530],[407,448],[1062,709]]){
+      oval(c,x+4,y+6,35,17,'#283b22')
+      oval(c,x,y,30,14,'#6e7d3d')
+      oval(c,x-6,y-3,25,10,'#84934a')
+      rect(c,x-25,y-1,47,2,'#a7ac5a')
+    }
     for(const radius of [215,520]){c.strokeStyle='#bfba6f39';c.lineWidth=3;c.setLineDash([5,12]);c.beginPath();c.arc(720,720,radius,0,7);c.stroke();c.setLineDash([])}
   }
   return surface
@@ -88,7 +100,7 @@ export function makeRenderer(canvas,minimap) {
     if(ant.earth)rect(c,size*.37,-4,7,7,'#b87148')
     c.restore()
   }
-  function draw(s,frameTime) {
+  function draw(s,frameTime,follow=true,cursor=null) {
     const selected=s.ants.find(a=>a.id===s.selected),camera=s.camera[s.view]
     const bounds=s.view==='colony'?NEST:FIELD
     const mapHeight=Math.round(map.width*bounds.h/bounds.w)
@@ -96,14 +108,29 @@ export function makeRenderer(canvas,minimap) {
     const base=s.view==='colony'?Math.min(w/850,h/410):Math.min(w/600,h/540)
     const desiredScale=Math.max(.22,base*camera.zoom*(selected?1.44:1))
     if(lastView!==s.view){lastView=s.view;fade=1;cam={x:camera.x,y:camera.y};scale=desiredScale}
-    const target=selected?.view===s.view?selected:camera
+    const target=follow&&selected?.view===s.view?selected:camera
     cam.x+=(target.x-cam.x)*.15;cam.y+=(target.y-cam.y)*.15
     scale+=(desiredScale-scale)*.15
     fade=Math.max(0,fade-.065)
     c.setTransform(dpr,0,0,dpr,0,0);rect(c,0,0,w,h,s.view==='colony'?'#201719':'#141d16')
     c.translate(w/2-cam.x*scale,h/2-cam.y*scale);c.scale(scale,scale);c.imageSmoothingEnabled=false
-    c.drawImage(background[s.view],0,0)
+    const backdrop=background[s.view]
+    const left=Math.floor((cam.x-w/2/scale)/bounds.w),right=Math.floor((cam.x+w/2/scale)/bounds.w)
+    const top=Math.floor((cam.y-h/2/scale)/bounds.h),bottom=Math.floor((cam.y+h/2/scale)/bounds.h)
+    for(let x=left;x<=right;x++)for(let y=top;y<=bottom;y++){
+      if(s.view==='colony'&&y!==0)continue
+      c.save()
+      c.translate((x+(x%2!==0?1:0))*bounds.w,(y+(y%2!==0?1:0))*bounds.h)
+      c.scale(x%2!==0?-1:1,y%2!==0?-1:1)
+      c.drawImage(backdrop,0,0)
+      c.restore()
+    }
+    if(s.view==='colony'){
+      if(top<0)rect(c,left*bounds.w,top*bounds.h,(right-left+1)*bounds.w,-top*bounds.h,'#123c38')
+      if(bottom>0)for(let x=left;x<=right;x++)c.drawImage(backdrop,0,bounds.h-224,bounds.w,224,x*bounds.w,bounds.h,bounds.w,bottom*bounds.h)
+    }
     const center=GATE[s.view]
+    const depth=Math.max(0,Math.round((cam.y-90)/24))
     if(s.view==='colony'){
       const dug=s.tunnels.filter(t=>t.done)
       for(const [size,color] of [[21,'#9b421f'],[15,'#d27437'],[11,'#5b2c1b']]){
@@ -139,9 +166,41 @@ export function makeRenderer(canvas,minimap) {
       }
       if(s.raid&&known(s,s.raid)){oval(c,s.raid.x,s.raid.y,16,11,'#45262a');rect(c,s.raid.x-16,s.raid.y-20,Math.max(0,s.raid.hp),3,'#ff654b')}
     }
+    if(s.view==='field'){
+      oval(c,center.x+4,center.y+9,55,39,'#263d28')
+      oval(c,center.x,center.y,49,33,'#7d512d')
+      oval(c,center.x,center.y-3,42,27,'#a27942')
+      for(let i=0;i<15;i++){
+        const angle=i*Math.PI*2/15
+        const x=center.x+Math.cos(angle)*46,y=center.y+Math.sin(angle)*30
+        rect(c,x-4,y-4,8,7,i%3?'#737767':'#a1a17d')
+        rect(c,x-3,y-4,5,2,'#bbb28b')
+      }
+      if(s.portal.level===3){oval(c,center.x,center.y-11,32,16,'#637047');oval(c,center.x,center.y-13,27,10,'#8e9a5c')}
+      for(const animal of s.wildlife||[])if(animal.hp>0&&known(s,animal)){
+        const wing=Math.sin(frameTime*32)*4
+        const wasp=animal.kind==='guêpe'
+        if(wasp){oval(c,animal.x-5,animal.y-8+wing,10,4,'#d9efe6bb');oval(c,animal.x+4,animal.y+8-wing,9,4,'#d9efe6bb')}
+        oval(c,animal.x,animal.y,wasp?13:15,wasp?6:10,wasp?'#f1bd47':'#44334a')
+        for(let i=-1;i<=1;i++)rect(c,animal.x+i*6-2,animal.y-4,3,8,wasp?'#45302c':'#8a6271')
+        if(animal.chasing)rect(c,animal.x-2,animal.y-20,4,9,'#ff6853')
+      }
+    }
     oval(c,center.x,center.y,15+s.portal.level*4,11,'#b47735')
     oval(c,center.x,center.y,12+s.portal.level*3,7,s.portal.closed?'#957a55':'#1d1915')
     if(s.portal.closed)line(c,[{x:center.x-10,y:center.y+4},{x:center.x+10,y:center.y-4}],3,'#e89e62')
+    if(selected?.view===s.view){
+      if(selected.move){
+        const target=selected.move
+        const route=selected.route?.points?.length?selected.route.points:[target]
+        line(c,[selected,...route],2,'#ffe39b99',[3,5])
+        c.strokeStyle='#ffe39b';c.lineWidth=2;c.strokeRect(target.x-5,target.y-5,10,10)
+      }
+      if(cursor&&s.view==='colony'&&dist(selected,cursor)<63){
+        const x=Math.round(cursor.x/CELL)*CELL,y=Math.round(cursor.y/CELL)*CELL
+        c.strokeStyle='#fbd17880';c.lineWidth=1;c.strokeRect(x-CELL/2,y-CELL/2,CELL,CELL)
+      }
+    }
     for(const ant of s.ants)if(ant.view===s.view)drawAnt(ant,ant===selected,frameTime)
     if(selected?.view===s.view&&s.view==='field'){
       for(const source of s.sources)if(known(s,source))oval(c,source.x,source.y,43,35,'#ffcf3228')
@@ -157,6 +216,9 @@ export function makeRenderer(canvas,minimap) {
       }
     }
     c.setTransform(dpr,0,0,dpr,0,0)
+    if(s.view==='colony'){
+      rect(c,8,8,116,23,'#112927df');c.font='bold 11px monospace';c.fillStyle='#ffd898';c.textAlign='left';c.fillText('Profondeur '+depth,15,23)
+    }
     if(fade)rect(c,0,0,w,h,'rgba(10,18,16,'+(fade*.75)+')')
     if(frameTime-mapTime>.25){
       mapTime=frameTime

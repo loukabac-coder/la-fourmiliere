@@ -2,6 +2,7 @@ import {CELL,GATE,FIELD,NEST,dist,nestRoute,reveal,excavated,cellKey,canStep,SOU
 import {queueAtPortal} from './portal.js'
 import {ROYAL,storageCapacity,storeResource,addTrail} from './colony.js'
 import {stats,award,guardIds} from './progression.js'
+import {studyLevel} from './journal.js'
 export const speedOf = ant=>(ant.role==='scout'?108:ant.role==='soldier'?65:73)*stats(ant).speed
 export function moveAnt(state,ant,target,dt,speed=speedOf(ant)) {
   if(ant.view==='colony') {
@@ -29,7 +30,7 @@ function dig(state,ant,tunnel,dt) {
     .filter(p=>excavated(state,p)&&nestRoute(state,ant,p).length)
     .sort((a,b)=>dist(a,ant)-dist(b,ant))[0]
   if(!adjacent||!moveAnt(state,ant,adjacent,dt))return
-  tunnel.work+=dt*stats(ant).speed
+  tunnel.work+=dt*stats(ant).speed*(1+studyLevel(state,'dig')*.15)
   if(tunnel.work>=1.4){tunnel.done=true;state.dug++;ant.earth=(ant.earth||0)+3*stats(ant).yield;award(state,ant,5)}
 }
 function revealAround(state,ant,radius){
@@ -105,7 +106,7 @@ export function updateAnts(state,dt,input) {
     for(let k=0;k<j.count;k++)jobs.set(workers[slot++].id,j)
   }
   for(const ant of state.ants) {
-    if((ant.energy??100)<100)ant.energy=Math.min(100,ant.energy+dt*7*stats(ant).regen)
+    if((ant.energy??100)<100)ant.energy=Math.min(100,ant.energy+dt*7*stats(ant).regen*(1+studyLevel(state,'rest')*.2))
     if(ant.id===state.selected){applyManual(state,ant,dt,input);continue}
     if(ant.role==='queen'){ant.cross=0;continue}
     const job=jobs.get(ant.id),order=missions.get(ant.id)
@@ -178,7 +179,7 @@ export function updateAnts(state,dt,input) {
   }
 }
 export function deliverCargo(state,ant) {
-  const amount=storeResource(state,ant.cargo.kind,ant.cargo.amount*stats(ant).yield)
+  const amount=storeResource(state,ant.cargo.kind,ant.cargo.amount*stats(ant).yield*(1+studyLevel(state,'haul')*.1))
   ant.delivered+=amount
   if(amount>0)award(state,ant,ant.cargo.heavy?6:4)
   return amount
@@ -192,7 +193,7 @@ export function manualDig(state,ant,point) {
   if(tunnel?.done||!adjacent||(!tunnel&&excavated(state,target)))return false
   if(!tunnel){tunnel={...target,done:false,work:0};state.tunnels.push(tunnel)}
   ant.energy=(ant.energy??100)-18
-  tunnel.work+=.8
+  tunnel.work+=.8*(1+studyLevel(state,'dig')*.15)
   if(tunnel.work>=1.4){tunnel.done=true;state.dug++;ant.earth=(ant.earth||0)+3*stats(ant).yield;award(state,ant,5)}
   return true
 }

@@ -121,7 +121,7 @@ try{
   await evaluate(`(()=>{
     const key='la-fourmiliere', record=JSON.parse(localStorage.getItem(key)), s=record.state
     for(let y=288;y<=384;y+=24)s.tunnels.push({x:576,y,done:true})
-    s.dug+=5;s.selected=null;s.view='colony';s.stock.earth=12
+    s.dug=Math.max(6,s.dug+5);s.selected=null;s.view='colony';s.stock.earth=12
     Object.assign(s.camera.colony,{x:576,y:384,zoom:1})
     localStorage.setItem(key,JSON.stringify(record))
   })()`)
@@ -140,6 +140,19 @@ try{
   await key('Enter')
   assert.equal(await stored('rooms[1].type'),'sugar')
   assert.equal(await stored('stock.earth'),6)
+  await key('l')
+  assert.equal(await evaluate("document.querySelector('#dialog-content h2').textContent"),'Carnet de la colonie')
+  const journalClick=label=>evaluate("[...document.querySelectorAll('#dialog-content button')].find(b=>b.textContent=== "+JSON.stringify(label)+" && !b.disabled).click()")
+  await journalClick('Récupérer 4 ambres')
+  await journalClick('Récupérer 5 ambres')
+  await journalClick('Améliorations')
+  await journalClick('Améliorer · 6 ambres')
+  assert.equal(await stored('studies.dig'),1)
+  assert.ok(await stored('claimedMilestones.includes("room")'))
+  await call('Page.reload')
+  await wait(900)
+  await evaluate("document.querySelector('#play').click()")
+  assert.equal(await stored('studies.dig'),1)
   assert.deepEqual(errors,[])
   console.log('Edge : accueil, ponte, changement de vue, incarnation, rechargement, formats mobiles.')
 }finally{

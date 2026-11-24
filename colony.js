@@ -1,4 +1,5 @@
 import {CELL,GATE,NEST,FIELD,SOURCES,gridLine,cellKey,dist,excavated,reveal,nestRoute} from './terrain.js'
+import {BLOOM_ID,studyLevel,updateGarden} from './journal.js'
 export const ROYAL={x:576,y:252,radius:66,type:'queen'}
 export const NIGHT=165
 export const DAY=240
@@ -129,21 +130,33 @@ export function storeResource(state,kind,amount) {
 export function offline(state,seconds) {
   const elapsed=Math.max(0,Math.min(28800,seconds))
   let sugar=0,born=0,erased=0
-  const workers=state.ants.filter(a=>a.role==='worker').length
+  const workers=state.ants.filter(a=>a.role==='worker')
+  const taken=new Set((state.missions||[]).flatMap(m=>m.members))
+  const free=workers.filter(a=>!taken.has(a.id)).length
+  const harvest=new Map()
+  const living=new Set(workers.map(a=>a.id))
+  for(const order of state.missions||[])if(order.type==='harvest'){
+    harvest.set(order.target,(harvest.get(order.target)||0)+order.members.filter(id=>living.has(id)).length)
+  }
   if(!elapsed)return {elapsed,sugar,born,erased}
-  const faded=new Set(state.trails.filter(t=>workers===0&&elapsed*t.strength>80||elapsed>=DAY&&t.strength<.24))
+  const faded=new Set(state.trails.filter(t=>workers.length===0&&elapsed*t.strength>80||elapsed>=DAY&&t.strength<.24))
   const active=state.trails.filter(t=>!faded.has(t))
+  const automatic=active.filter(t=>!harvest.has(t.source))
+  const routes=active.map(t=>{
+    const source=state.sources.find(s=>s.id===t.source)
+    const trip=t.points.slice(1).reduce((total,p,j)=>total+dist(p,t.points[j]),0)*2/69+5
+    const index=automatic.indexOf(t)
+    const available=harvest.get(t.source)??(Math.floor(free/automatic.length)+(index<free%automatic.length?1:0))
+    return {source,trip,available}
+  }).filter(({source,available})=>source&&available>=source.load)
   const steps=Math.ceil(elapsed/10)
   for(let i=0;i<steps;i++) {
     const dt=Math.min(10,elapsed-i*10)
-    active.forEach((t,index)=>{
-      const available=Math.floor(workers/active.length)+(index<workers%active.length?1:0)
-      const source=state.sources.find(s=>s.id===t.source)
-      if(!source||available<source.load||state.portal.closed)return
-      const trip=t.points.slice(1).reduce((total,p,j)=>total+dist(p,t.points[j]),0)*2/69+5
-      const gain=storeResource(state,source.kind,dt/trip*source.yield*available/source.load)
+    if(!state.portal.closed)for(const {source,trip,available} of routes){
+      const duration=source.id===BLOOM_ID?Math.max(0,Math.min(dt,state.bloomUntil-state.time-i*10)):dt
+      const gain=storeResource(state,source.kind,duration/trip*source.yield*available/source.load*(1+studyLevel(state,'haul')*.1))
       if(source.kind==='sugar')sugar+=gain
-    })
+    }
     state.stock.sugar=Math.max(0,state.stock.sugar-state.ants.length*.014*dt)
     born+=ageBrood(state,dt)
   }
@@ -152,5 +165,6 @@ export function offline(state,seconds) {
   state.time+=elapsed
   state.nextRain=Math.max(state.nextRain,state.time+45)
   state.rain=0
+  updateGarden(state,false)
   return {elapsed,sugar:Math.floor(sugar),born,erased}
 }

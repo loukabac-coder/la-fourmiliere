@@ -6,6 +6,7 @@ import {FINDS,MISSIONS,stats,award,restoreProgression,assignMission,availableAnt
 import {upgradePortal,LEVELS,atPortal,requestCrossing} from './portal.js'
 import {readSave,writeSave,clearSave,encodeSave,decodeSave} from './save.js'
 import {makeRenderer} from './render.js'
+import {MILESTONES,STUDIES,buyStudy,claimMilestone,markMilestones,studyCost,studyLevel,unclaimedCount} from './journal.js'
 const $=id=>document.getElementById(id)
 const canvas=$('world'),dialog=$('dialog'),content=$('dialog-content')
 let state=null,renderer=null,mode=null,gesture=null,last=0,acc=0,lastSave=0,lastUi=0,noticeTimer
@@ -41,6 +42,7 @@ function tutorial(text){if(state.tutorial)show(text)}
 function start(record) {
   state=record?.state||createState()
   restoreProgression(state)
+  markMilestones(state)
   const report=record&&Date.now()-record.savedAt>30000?offline(state,(Date.now()-record.savedAt)/1000):null
   last=0;acc=0;mode=null;buildType=null;buildSite=null;follow=true;cursor=null;keys.clear()
   for(const ant of state.ants){
@@ -106,12 +108,35 @@ function ui(){
   $('energy').value=actor?.energy??100
   $('actor-status').textContent=actor?'Contrôle · '+ROLE_NAMES[actor.role]+' · Niv. '+stats(actor).level:'Vue de gestion'
   $('orders').textContent='Missions · J'+(state.missions.length?' ('+state.missions.length+')':'')
+  const rewards=unclaimedCount(state)
+  $('journal').textContent='Carnet · L'+(rewards?' ('+rewards+')':'')
+  $('journal').classList.toggle('request',rewards>0)
+  updateNextAction()
+  const weather=$('garden-status')
+  weather.hidden=view!=='field'
+  weather.textContent=state.rain?'☂ Pluie · '+Math.ceil(state.rain)+' s':
+    state.bloomUntil>state.time?'✦ Nectar de pluie · '+Math.ceil(state.bloomUntil-state.time)+' s':
+    (state.time%DAY>NIGHT?'☾ Nuit':'☀ Jour')+' · Pluie dans '+Math.max(0,Math.ceil(state.nextRain-state.time))+' s'
   for(const id of ['role','lay','dig','build'])$(id).hidden=view!=='colony'
   $('trail').hidden=view!=='field'
   $('carry').hidden=!actor||actor.role==='queen'
   $('excavate').hidden=view!=='colony'
   $('action').textContent=actor?.role==='soldier'?'Attaquer':actor?.role==='scout'?'Alerter':view==='colony'?'Creuser / déposer':'Poser une piste'
   for(const id of ['dig','build','trail'])$(id).setAttribute('aria-pressed',String(mode===id))
+}
+function updateNextAction(){
+  const b=$('next-action')
+  const hasRoom=state.rooms.some(r=>r.type!=='queen')
+  const suggestion=state.view!=='colony'||state.raid?null:
+    !state.nextLayAt&&state.brood.length===0&&state.record<=4?['Pondre le premier œuf',()=>$('lay').click()]:
+    state.dug<6&&state.digProposal&&!state.tunnels.some(t=>!t.done)?['Examiner le premier tracé',()=>$('dig-request').click()]:
+    !hasRoom&&state.stock.earth>=6?['Construire une première salle',()=>$('build').click()]:null
+  b.hidden=!suggestion
+  if(!suggestion)return
+  b.textContent=suggestion[0]
+  b.onclick=suggestion[1]
+  if(suggestion[0]==='Pondre le premier œuf')b.disabled=$('lay').disabled
+  else b.disabled=false
 }
 function guide(){
   modal('Guide de la colonie','Ton but : faire grandir la colonie jusqu’à 30 fourmis, puis repousser le raid rival.')
@@ -129,6 +154,39 @@ function guide(){
   }
   content.append(list)
   button('Reprendre la partie',()=>dialog.close())
+}
+function journal(tab='goals'){
+  markMilestones(state)
+  modal('Carnet de la colonie','Termine des objectifs, récupère de l’ambre et améliore toute la colonie.')
+  const goals=button('Objectifs',()=>journal('goals'))
+  const studies=button('Améliorations',()=>journal('studies'))
+  goals.setAttribute('aria-pressed',String(tab==='goals'))
+  studies.setAttribute('aria-pressed',String(tab==='studies'))
+  const list=document.createElement('section');list.className='journal-list';content.append(list)
+  const rows=tab==='goals'?MILESTONES.map(item=>{
+    const progress=Math.min(item.goal,Math.floor(item.progress(state)))
+    const claimed=state.claimedMilestones?.includes(item.id)
+    const earned=state.earnedMilestones.includes(item.id)
+    return {label:item.label,description:item.detail,value:earned?item.goal:progress,max:item.goal,
+      action:claimed?'Récompense reçue':'Récupérer '+item.reward+' ambres',disabled:claimed||!earned,
+      activate:()=>claimMilestone(state,item.id)}
+  }):Object.entries(STUDIES).map(([id,item])=>{
+    const level=studyLevel(state,id),cost=studyCost(state,id)
+    return {label:item.name,description:item.detail,value:level,max:3,
+      action:level===3?'Niveau maximal':'Améliorer · '+cost+' ambres',disabled:level===3||state.amber<cost,
+      activate:()=>buyStudy(state,id)}
+  })
+  for(const item of rows){
+    const row=document.createElement('article')
+    const label=document.createElement('strong');label.textContent=item.label
+    const desc=document.createElement('p');desc.textContent=item.description
+    const meter=document.createElement('progress');meter.max=item.max;meter.value=item.value;meter.setAttribute('aria-label',item.label)
+    const count=document.createElement('span');count.textContent=item.value+'/'+item.max
+    const action=document.createElement('button');action.type='button';action.textContent=item.action;action.disabled=item.disabled
+    action.onclick=()=>{if(item.activate()){save();ui();journal(tab)}}
+    row.append(label,desc,meter,count,action);list.append(row)
+  }
+  if(tab==='studies')detail('Ambre disponible · '+state.amber)
 }
 function options() {
   modal('Options')
@@ -303,6 +361,7 @@ function carry(){
 function setMode(next,text){mode=mode===next?null:next;ui();if(mode)show(text)}
 $('play').onclick=()=>start(saved)
 $('help').onclick=guide
+$('journal').onclick=()=>journal()
 $('orders').onclick=orders
 $('options').onclick=$('home-options').onclick=options
 $('portal').onclick=portalMenu
@@ -492,7 +551,7 @@ $('build-cancel').onclick=cancelBuild
 const shortcuts={
   e:()=>state.view==='colony'&&(state.selected===null||state.selected===0)&&$('lay').click(),
   f:excavate,b:()=>state.view==='colony'&&$('build').click(),r:()=>$('random').click(),
-  h:()=>$('event').click(),p:crossPortal,o:portalMenu,c:carry,x:action,g:queen,i:hero,j:orders,
+  h:()=>$('event').click(),p:crossPortal,o:portalMenu,c:carry,x:action,g:queen,i:hero,j:orders,l:()=>journal(),
   t:()=>state.view==='field'&&$('trail').click(),v:()=>switchView(state.view==='colony'?'field':'colony'),
   m:()=>{pan(0,0);releaseControl();mode=null;ui()},enter:confirmBuild,escape:cancelBuild,
   '1':()=>chooseRoom('brood'),'2':()=>chooseRoom('sugar'),'3':()=>chooseRoom('protein'),'4':()=>chooseRoom('barracks'),

@@ -2,6 +2,7 @@ import {CELL,GATE,NEST,FIELD,ROOM_NAMES,known,dist,excavated} from './terrain.js
 import {DAY,NIGHT,broodLayout,LARVA_SECONDS,ROOM_LIMITS,BASE_STORAGE} from './colony.js'
 import {rivalGate} from './enemies.js'
 import {FINDS} from './progression.js'
+import {BLOOM_ID} from './journal.js'
 const colors={sugar:'#fac243',protein:'#da6340',brood:'#fff1c5',queen:'#f8a42f',barracks:'#d26d42'}
 function rect(c,x,y,w,h,color){c.fillStyle=color;c.fillRect(Math.round(x),Math.round(y),w,h)}
 function oval(c,x,y,rx,ry,color) {
@@ -128,14 +129,15 @@ export function makeRenderer(canvas) {
       if(top<0)rect(c,left*bounds.w,top*bounds.h,(right-left+1)*bounds.w,-top*bounds.h,'#123c38')
       if(bottom>0)for(let x=left;x<=right;x++)c.drawImage(backdrop,0,bounds.h-224,bounds.w,224,x*bounds.w,bounds.h,bounds.w,bottom*bounds.h)
     }
+    const inFrame=(p,margin=36)=>Math.abs(p.x-cam.x)<w/2/scale+margin&&Math.abs(p.y-cam.y)<h/2/scale+margin
     const center=GATE[s.view]
     const depth=Math.max(0,Math.round((cam.y-90)/24))
     if(s.view==='colony'){
-      const dug=s.tunnels.filter(t=>t.done)
+      const dug=s.tunnels.filter(t=>t.done&&inFrame(t))
       for(const [size,color] of [[21,'#9b421f'],[15,'#d27437'],[11,'#5b2c1b']]){
         for(const p of dug)rect(c,p.x-size,p.y-size,size*2,size*2,color)
       }
-      for(const t of s.tunnels.filter(t=>!t.done))rect(c,t.x-7,t.y-7,14,14,'#ffc77346')
+      for(const t of s.tunnels.filter(t=>!t.done&&inFrame(t)))rect(c,t.x-7,t.y-7,14,14,'#ffc77346')
       if(s.digProposal)line(c,[s.digProposal.start,s.digProposal.end],3,'#91dfc7bb',[4,7])
       for(const room of s.roomProjects||[]){c.strokeStyle='#9ce3d0';c.setLineDash([5,5]);c.strokeRect(room.x-26,room.y-22,52,44);c.setLineDash([])}
       const allocated={...BASE_STORAGE}
@@ -174,7 +176,12 @@ export function makeRenderer(canvas) {
       }
     }else{
       for(const trail of s.trails)line(c,trail.points,4,'rgba(216,240,107,'+Math.max(0,trail.strength)+')',[2,8])
-      for(const source of s.sources)if(known(s,source)){
+      for(const source of s.sources)if(known(s,source)&&inFrame(source,60)){
+        if(source.id===BLOOM_ID){
+          const pulse=20+Math.sin(frameTime*4)*4
+          oval(c,source.x,source.y,pulse,pulse*.72,'#ffda6546')
+          oval(c,source.x,source.y,8,12,'#ffdb6c')
+        }
         oval(c,source.x,source.y+6,source.load>1?29:17,11,'#283324')
         for(let i=0;i<5;i++)rect(c,source.x-12+i%3*9,source.y-5+Math.floor(i/3)*9,8,8,colors[source.kind])
         if(scale>.5){c.font='bold 13px monospace';c.textAlign='center';c.fillStyle='#fff0b8';c.fillText(source.name,source.x,source.y-19)}
@@ -229,14 +236,14 @@ export function makeRenderer(canvas) {
         c.strokeStyle='#fbd17880';c.lineWidth=1;c.strokeRect(x-CELL/2,y-CELL/2,CELL,CELL)
       }
     }
-    for(const ant of s.ants)if(ant.view===s.view)drawAnt(ant,ant===selected,frameTime)
+    for(const ant of s.ants)if(ant.view===s.view&&inFrame(ant,70))drawAnt(ant,ant===selected,frameTime)
     if(selected?.view===s.view&&s.view==='field'){
       for(const source of s.sources)if(known(s,source))oval(c,source.x,source.y,43,35,'#ffcf3228')
       for(const trail of s.trails)line(c,trail.points,21,'#adff6d24')
       if(known(s,s.spider))oval(c,s.spider.x,s.spider.y,53,44,'#ff432b39')
     }
     if(s.view==='field'){
-      for(let y=0;y<30;y++)for(let x=0;x<30;x++)if(!s.fog[x+','+y])rect(c,x*48,y*48,48,48,'#151e18')
+      for(let y=0;y<30;y++)for(let x=0;x<30;x++)if(!s.fog[x+','+y]&&inFrame({x:x*48+24,y:y*48+24}))rect(c,x*48,y*48,48,48,'#121f19ee')
       if(s.time%DAY>NIGHT)rect(c,0,0,FIELD.w,FIELD.h,'#10204c55')
       if(s.rain)for(let i=0;i<35;i++){
         const x=(i*131+frameTime*115)%FIELD.w,y=(i*317+frameTime*440)%FIELD.h

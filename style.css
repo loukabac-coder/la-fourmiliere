@@ -16,6 +16,13 @@ button.request{border-color:#91dfc7;color:#b9f0dd}
 #build-status{flex:1;min-width:10rem;font-size:.86rem}
 #build-confirm{border-color:#91dfc7}
 .brood-status{align-self:center;color:#ffdc9e;font-size:.82rem}
+#next-action{margin-inline-start:auto;color:#f5dca4;font-size:.78rem;padding:.26rem .48rem}
+#garden-status{position:absolute;top:.55rem;left:.55rem;color:#ffe4a9;background:#102925e8;border:1px solid #83714c;padding:.34rem .55rem;font-size:.78rem;pointer-events:none}
+.journal-list{display:grid;gap:.45rem;margin-top:.65rem}
+.journal-list article{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.23rem .55rem;align-items:center;background:#0e2521;border:1px solid #477265;padding:.6rem .65rem}
+.journal-list article p{grid-column:1/-1;margin:.08rem 0;font-size:.85rem;color:#d5d2b6}
+.journal-list article progress{width:100%;height:.7rem;accent-color:#d8ab58}
+.journal-list article button{grid-column:1/-1;justify-self:start;margin:.12rem 0 0}
 *{box-sizing:border-box} [hidden]{display:none!important}
 :root{color-scheme:dark;--gold:#ffce72;--rim:#a56832;--ink:#0b1d1c;--panel:#143634;--cream:#ffe7b1}
 body{margin:0;background:var(--ink);color:var(--cream);font:16px system-ui,sans-serif}

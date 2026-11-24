@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>La Fourmilière — Jeu de colonie de fourmis</title>
+<meta name="description" content="Fonde ta fourmilière, creuse des galeries, récolte dans le jardin et incarne tes fourmis dans ce jeu gratuit en pixel art.">
+<meta property="og:title" content="La Fourmilière">
+<meta property="og:description" content="Un jeu de gestion de colonie en pixel art, jouable dans le navigateur.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://la-fourmiliere-pixel.vast-gull-2349.chatgpt.site/fourmiliere.png">
+<link rel="icon" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="main.js"></script>
+</head>
+<body>
+<main id="home">
+  <section class="hero">
+    <p class="eyebrow">Jeu de gestion de colonie</p>
+    <h1>La Fourmilière</h1>
+    <p>Trois ouvrières, une reine et tout un jardin à explorer. Creuse sous les racines, élève ton couvain et prends les commandes de n’importe quelle fourmi.</p>
+    <button id="play" class="primary">Jouer</button>
+    <button id="home-options">Options</button>
+  </section>
+</main>
+<main id="game" hidden>
+  <header><strong>La Fourmilière</strong><div id="resources"></div><button id="options">Options</button></header>
+  <nav><button data-view="colony">Colonie</button><button data-view="field">Terrain</button><span id="objective"></span></nav>
+  <section id="stage">
+    <canvas id="world" aria-label="Terrain de jeu"></canvas>
+    <div id="zoom"><button id="minus" aria-label="Dézoomer">−</button><button id="plus" aria-label="Zoomer">+</button></div>
+    <p id="notice" role="status"></p>
+    <div id="minimap" aria-hidden="true"></div>
+  </section>
+  <footer>
+    <div id="management">
+      <select id="role" aria-label="Rôle à la naissance"><option value="worker">Ouvrière</option><option value="soldier">Soldate</option><option value="scout">Éclaireuse</option></select>
+      <button id="lay">Pondre</button><button id="dig">Creuser</button>
+      <select id="room" aria-label="Chambre à aménager"><option value="brood">Couvain</option><option value="sugar">Grenier à sucre</option><option value="protein">Garde-manger</option><option value="barracks">Caserne</option></select>
+      <button id="build">Aménager</button>
+      <button id="trail">Tracer une piste</button>
+    </div>
+    <div id="manual" hidden><button id="carry">Ramasser / lâcher</button><button id="action">Action</button><button id="hero">Fiche</button><button id="queen">Retour à la reine</button></div>
+    <div><button id="random">Fourmi au hasard</button><button id="event">Là où ça se passe</button><button id="portal">Portail</button></div>
+  </footer>
+</main>
+<dialog id="dialog"><form method="dialog"><button class="close" aria-label="Fermer">×</button></form><div id="dialog-content"></div></dialog>
+</body>
+</html>
